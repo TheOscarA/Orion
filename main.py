@@ -18,7 +18,7 @@ import tkinter as tk
 from threading import Thread
 
 # Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "H496UA-PEAKXWTVP6"
+WOLFRAM_APP_ID = "Your Wolfram ID"
 client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
@@ -221,10 +221,6 @@ def assistant_logic(ui):
                 screenshot.save(f"screenshot_{current_time}.png")
                 speak("Screenshot taken.")
                 ui.update_text("Screenshot taken.")
-            elif "daily text" in query:
-                text = "https://wol.jw.org/en/wol/h/r1/lp-e"
-                webbrowser.open(text)
-                ui.update_text("Opened daily text.")
             elif "wolfram" in query or "calculate" in query or "what is" in query:
                 wolfram_query = query.replace("wolfram", "").replace("calculate", "").strip()
                 wolfram_answer = query_wolfram_alpha(wolfram_query)
