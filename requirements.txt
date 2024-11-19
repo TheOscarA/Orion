@@ -1,4 +1,4 @@
 Requirements
 the following can be installed in the prgrammning environment using the pip install comand
 I actually cant be bothered run the code you will get an error then keep installing the required libraries
-you should probably get a Wolfram Alpha api key and a News Api key
+you should probably get a Wolfram Alpha api key and a News Api  api key these can be found at https://newsapi.org/ and at https://products.wolframalpha.com/api/
