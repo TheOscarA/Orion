@@ -2,7 +2,7 @@ import requests
 
 def get_news():
     news_hedline = []
-    result = requests.get(f"https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey=dd6b5daf6cf94451b0d01b24101e3b0c").json()
+    result = requests.get(f"https://newsapi.org/v2/top-headlines?country=us&category=business&apiKey=your-api-key").json()
     articles = result["articles"]
     for article in articles:
         news_hedline.append(article["title"])
