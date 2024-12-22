@@ -6,6 +6,9 @@ import numpy as np
 import pyautogui
 import webbrowser
 import wolframalpha
+import psutil
+import os
+import random
 from datetime import datetime
 from GreetMe import greetMe
 from Get_News import get_news
@@ -16,9 +19,11 @@ from application_control import open_application, close_application
 from SearchNow import searchGoogle, searchYoutube, searchWikipedia
 import tkinter as tk
 from threading import Thread
+from tkinter import messagebox
+# add system info into ui like battery cpu etc.
 
 # Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "Your Wolfram ID"
+WOLFRAM_APP_ID = "Your Wolfram Alpha ID"
 client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
@@ -37,11 +42,12 @@ def takeCommand(ui):
     """Listen to a command and return the text"""
     r = sr.Recognizer()
     with sr.Microphone() as source:
+        r.adjust_for_ambient_noise(source)
         print("Listening...")
         ui.update_status('listening')  # Update status to 'listening'
         r.pause_threshold = 1
         r.energy_threshold = 300
-        audio = r.listen(source, 0, 4)
+        audio = r.listen(source, timeout=None)
 
     try:
         print("Understanding")
@@ -52,6 +58,7 @@ def takeCommand(ui):
         print(e)
         return "None"
     return query
+
 
 
 number_words = {
@@ -109,28 +116,142 @@ def query_wolfram_alpha(query):
     except Exception as e:
         print(f"Error querying Wolfram Alpha: {e}")
         return "Sorry, I couldn't retrieve information from Wolfram Alpha."
+    
+def get_system_stats():
+    cpu_usage = psutil.cpu_percent(interval=1)
+    memory_info = psutil.virtual_memory()
+    battery = psutil.sensors_battery()
+
+    # Check if the battery information is available
+    if battery is not None:
+        battery_status = f"{battery.percent}% remaining, {'Plugged in' if battery.power_plugged else 'Not plugged in'}"
+    else:
+        battery_status = "No battery info available (desktop or non-battery system)"
+
+    return (
+        f"CPU: {cpu_usage}% |\n "
+        f"Memory: {memory_info.percent}% |\n "
+        f"Battery: {battery_status}"
+    )
+
+class ToDoList:
+    def __init__(self, parent):
+        self.parent = parent
+        self.file_path = 'todo_list.txt'
+        self.frame = tk.Frame(parent, bg='black')
+        self.frame.place(relx=0.01, rely=0.01, anchor='nw', width=200, height=300)
+
+        self.listbox = tk.Listbox(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10))
+        self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        self.entry = tk.Entry(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10))
+        self.entry.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
+
+        self.add_button = tk.Button(self.frame, text='Add Task', command=self.add_task, bg='blue', fg='lightblue', font=('Helvetica', 10))
+        self.add_button.pack(side=tk.BOTTOM, pady=5)
+
+        self.remove_button = tk.Button(self.frame, text='Remove Task', command=self.remove_task, bg='red', fg='lightblue', font=('Helvetica', 10))
+        self.remove_button.pack(side=tk.BOTTOM, pady=5)
+
+        #load existing tasks
+        self.load_tasks()
+
+    def add_task(self):
+        task = self.entry.get()
+        if task:
+            self.listbox.insert(tk.END, task)
+            self.entry.delete(0, tk.END)
+            self.save_tasks()  # Save the updated list to the file
+
+
+    def remove_task(self):
+        try:
+            selected_index = self.listbox.curselection()[0]  # Get the index of the selected item
+            self.listbox.delete(selected_index)  # Remove the item from the Listbox
+            self.save_tasks()  # Save the updated list to the file
+        except IndexError:
+            speak("Sir, you did not select a task for me to remove. Would you like to try that again sir?")
+
+    def save_tasks(self):
+        try:
+            with open(self.file_path, 'w') as file:
+                for task in self.listbox.get(0, tk.END):
+                    file.write(task + '\n')
+        except Exception as e:
+            print(f"An error occurred while saving tasks: {e}")
+
+
+    def load_tasks(self):
+        """Load the tasks from a file"""
+        if os.path.exists(self.file_path):
+            with open(self.file_path, 'r') as file:
+                tasks = file.readlines()
+                for task in tasks:
+                    self.listbox.insert(tk.END, task.strip())
+            
+
+    
+
+import psutil
+import tkinter as tk
+
+class SystemInfo:
+    def __init__(self, parent):
+        self.parent = parent
+        self.frame = tk.Frame(parent, bg='black')
+        self.frame.place(relx=0.01, rely=0.8, anchor='sw', width=300, height=150)
+
+        self.info_label = tk.Label(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10), anchor='nw', justify='left')
+        self.info_label.pack(fill=tk.BOTH, expand=False)
+
+        self.update_info()
+
+    def update_info(self):
+        """Update system information"""
+        battery = psutil.sensors_battery()
+        cpu_usage = psutil.cpu_percent(interval=1)
+        memory = psutil.virtual_memory()
+        battery_status = f"{battery.percent}% remaining" if battery else "No battery info available"
+        memory_usage = f"{memory.percent}% used"
+
+        info = (f"| CPU Usage: {cpu_usage}% |\n"
+                f"| Memory Usage: {memory_usage}\n"
+                f"|Battery Status: {battery_status}")
+        self.info_label.config(text=info)
+
 
 class VoiceAssistantUI:
     """UI class for the voice assistant"""
     def __init__(self, root):
         self.root = root
-        self.root.title("Voice Assistant")
-        self.root.geometry("600x600")
+        self.root.title("ORION MK1")
         self.root.configure(bg='black')
 
-        self.canvas = tk.Canvas(root, bg='black', width=600, height=600)
+        self.canvas = tk.Canvas(root, bg='black')
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Define circle position and size
-        self.circle_x1, self.circle_y1, self.circle_x2, self.circle_y2 = 100, 100, 500, 500
-        self.circle = self.canvas.create_oval(self.circle_x1, self.circle_y1, self.circle_x2, self.circle_y2, outline='blue', width=5)
+        # Define circle position and size relative to window size
+        self.circle = self.canvas.create_oval(0, 0, 100, 100, outline='blue', width=5)
+
+
 
         # Create a Text widget inside the circle
-        self.text_box = tk.Text(root, wrap=tk.WORD, height=11, width=30, bg='black', fg='lightblue', font=('Helvetica', 12), bd=0, relief=tk.FLAT)
-        self.text_box.place(x=175, y=200)
-
+        self.text_box = tk.Text(root, wrap=tk.WORD, bg='black', fg='lightblue', font=('Helvetica', 12), bd=0, relief=tk.FLAT)
+        
         # Create status text widget
-        self.status_text = self.canvas.create_text(300, 550, text="Idle", fill='white', font=('Helvetica', 12))
+        self.status_text = self.canvas.create_text(0, 0, text="Idle", fill='lightblue', font=('Helvetica', 12))
+
+        # Initialize To-Do List widget
+        self.todo_list = ToDoList(root)
+
+        #initialise system info widget
+        self.system_info = SystemInfo(root)
+
+        # Initialize system monitoring widget
+        self.system_monitor = tk.Label(root, bg='black', fg='lightblue', font=('Helvetica', 10), anchor='sw', justify='left')
+
+        # Initial layout update
+        self.update_layout()
 
     def update_status(self, status):
         """Update the status text and circle color"""
@@ -140,13 +261,44 @@ class VoiceAssistantUI:
         elif status == 'understanding':
             self.canvas.itemconfig(self.circle, outline='red')
         else:
-            self.canvas.itemconfig(self.circle, outline='blue')
+            self.canvas.itemconfig(self.circle, outline='lightblue')
 
     def update_text(self, text):
         """Update the text box with command outputs"""
         self.text_box.delete(1.0, tk.END)
         self.text_box.insert(tk.END, text)
 
+    def update_system_monitor(self, stats):
+        """Update the system monitoring widget"""
+        self.system_monitor.config(text=stats)
+
+    def update_layout(self):
+        """Update widget positions and sizes"""
+        # Get window size
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+
+        # Update circle size and position
+        circle_size = min(width, height) * 0.8
+        self.canvas.coords(self.circle, 
+                           (width - circle_size) / 2, 
+                           (height - circle_size) / 2, 
+                           (width + circle_size) / 2, 
+                           (height + circle_size) / 2)
+
+        # Update text box position and size
+        self.text_box.place(relx=0.5, rely=0.5, anchor='center', height=int(height * 0.39), width=int(width * 0.39))
+
+        # Update status text position
+        self.canvas.coords(self.status_text, width / 2, height - 30)
+
+        # Update system monitor position
+        self.system_monitor.place(x=10, y=height - 150)
+
+def toggle_fullscreen(event=None):
+    """Toggle between full screen and windowed mode."""
+    current_state = root.attributes("-fullscreen")
+    root.attributes("-fullscreen", not current_state)
 
 def assistant_logic(ui):
     awake = False
@@ -158,40 +310,49 @@ def assistant_logic(ui):
             if query == "none":
                 continue
             if "go to sleep" in query:
-                speak("Alright sir, I will be available anytime")
                 ui.update_text("Alright sir, I will be available anytime")
+                speak("Alright sir, I will be available anytime")
                 awake = False
+
             elif "hello" in query:
-                speak("Hello sir, how are you?")
                 ui.update_text("Hello sir, how are you?")
+                speak("Hello sir, how are you?")
+                
             elif "i am fine" in query:
-                speak("Good to hear, sir")
                 ui.update_text("Good to hear, sir")
+                speak("Good to hear, sir")
+                
             elif "how are you" in query:
-                speak("No errors and fully functional, sir")
                 ui.update_text("No errors and fully functional, sir")
+                speak("No errors and fully functional, sir")
+                
             elif "thank you" in query:
-                speak("My pleasure sir")
                 ui.update_text("My pleasure sir")
+                speak("My pleasure sir")
+                
             elif "set volume" in query:
                 volume_level = parse_volume_level(query)
                 if volume_level is not None:
                     set_volume(volume_level / 100)
-                    speak(f"Volume level set to {volume_level} percent")
                     ui.update_text(f"Volume level set to {volume_level} percent")
+                    speak(f"Volume level set to {volume_level} percent")
+                    
                 else:
-                    speak("Sorry, I couldn't understand the volume level.")
                     ui.update_text("Sorry, I couldn't understand the volume level.")
+                    speak("Sorry, I couldn't understand the volume level.")
+                    
             elif "set brightness" in query:
                 brightness_level = parse_brightness_level(query)
                 if brightness_level is not None:
                     set_brightness(brightness_level)
-                    speak(f"Brightness level set to {brightness_level} percent")
                     ui.update_text(f"Brightness level set to {brightness_level} percent")
+                    speak(f"Brightness level set to {brightness_level} percent")
+                    
                 else:
-                    speak("Sorry, I couldn't understand the brightness level.")
                     ui.update_text("Sorry, I couldn't understand the brightness level.")
-            elif "shutdown" in query:
+                    speak("Sorry, I couldn't understand the brightness level.")
+                    
+            elif "shutdown" in query or "shut down" in query:
                 speak("Shutting down in 10 seconds")
                 ui.update_text("Shutting down in 10 seconds")
                 time.sleep(10)
@@ -203,24 +364,38 @@ def assistant_logic(ui):
                 ui.update_text("Restarting the system.")
                 restart()
             elif "open" in query:
-                open_application(query)
-                ui.update_text(f"Opening application: {query}")
+                app_name = query.replace("open", "")
+                ui.update_text(f"Opening application: {app_name}")
+                open_application(app_name)
+                
             elif "close" in query:
                 app_name = query.replace("close", "").strip()
                 close_application(app_name)
                 ui.update_text(f"Closing application: {app_name}")
+
             elif "google" in query:
                 searchGoogle(query, ui)
+
+
             elif "youtube" in query:
                 searchYoutube(query, ui)
+
+
             elif "wikipedia" in query:
                 searchWikipedia(query, ui)
+
             elif "take a screenshot" in query:
                 current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                 screenshot = pyautogui.screenshot()
                 screenshot.save(f"screenshot_{current_time}.png")
                 speak("Screenshot taken.")
                 ui.update_text("Screenshot taken.")
+
+            elif "daily text" in query:
+                text = "https://wol.jw.org/en/wol/h/r1/lp-e"
+                webbrowser.open(text)
+                ui.update_text("Opened daily text.")
+
             elif "wolfram" in query or "calculate" in query or "what is" in query:
                 wolfram_query = query.replace("wolfram", "").replace("calculate", "").strip()
                 wolfram_answer = query_wolfram_alpha(wolfram_query)
@@ -230,7 +405,45 @@ def assistant_logic(ui):
             elif "latest news" in query:
                 speak("Here is the latest news sir.")
                 print(*get_news(),sep="\n")
+                ui.update_text(get_news())
                 speak(get_news())
+
+            elif "system status" in query:
+                system_stats = get_system_stats()
+                ui.update_text(system_stats)
+                speak(system_stats)
+
+            elif "play music" in query:
+                open_application("Spotify")
+                pyautogui.moveTo(683,650)
+                time.sleep(3)
+                pyautogui.click()
+
+            elif "pause music" in query:
+                open_application("Spotify")
+                pyautogui.moveTo(683,650)
+                time.sleep(3)
+                pyautogui.click()
+
+            elif "skip song" in query or "next song" in query or "skip track" in query:
+                open_application("Spotify")
+                pyautogui.moveTo(723,650)
+                time.sleep(3)
+                pyautogui.click()
+
+            elif "previous song" in query or "last song" in query:
+                open_application("Spotify")
+                pyautogui.moveTo(643,650)
+                time.sleep(3)
+                pyautogui.click()
+                time.sleep(0.2)
+                pyautogui.click()
+            
+            elif "flip a coin" in query:
+                coinop = ["Heads", "Tails"]
+                coin = random.choice(coinop)
+                ui.update_text(coin)
+                speak("Sir, I got heads.")
                 
             else:
                 speak("Sorry, I didn't understand that command. Could you please repeat it?")
@@ -248,13 +461,25 @@ def assistant_logic(ui):
                 ui.update_status('listening')
 
 def main():
+    global root
     root = tk.Tk()
     ui = VoiceAssistantUI(root)
-    
+
+    # Set the window to full screen
+    root.attributes("-fullscreen", True)
+    root.bind("<Escape>", lambda e: root.attributes("-fullscreen", False))  # Exit full screen with Escape key
+
+    #bind del to make full screen
+    root.bind("<Delete>", toggle_fullscreen)
+
+    # Bind resize event
+    root.bind("<Configure>", lambda event: ui.update_layout())
+
     # Run the assistant logic in a separate thread
     Thread(target=assistant_logic, args=(ui,)).start()
-    
+
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()
