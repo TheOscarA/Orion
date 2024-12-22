@@ -23,7 +23,7 @@ from tkinter import messagebox
 # add system info into ui like battery cpu etc.
 
 # Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "Your Wolfram ID"
+WOLFRAM_APP_ID = "H496UA-PEAKXWTVP6"
 client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
