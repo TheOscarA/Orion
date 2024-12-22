@@ -423,7 +423,7 @@ def assistant_logic(ui):
                 open_application("Spotify")
                 pyautogui.moveTo(683,650)
                 time.sleep(3)
-                pyautogui.click()
+                pyautogui.press('space') 
 
             elif "skip song" in query or "next song" in query or "skip track" in query:
                 open_application("Spotify")
