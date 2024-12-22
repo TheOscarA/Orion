@@ -23,7 +23,7 @@ from tkinter import messagebox
 # add system info into ui like battery cpu etc.
 
 # Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "Your Wolfram Alpha ID"
+WOLFRAM_APP_ID = "Your Wolfram ID"
 client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
@@ -417,7 +417,7 @@ def assistant_logic(ui):
                 open_application("Spotify")
                 pyautogui.moveTo(683,650)
                 time.sleep(3)
-                pyautogui.click()
+                pyautogui.press('space') 
 
             elif "pause music" in query:
                 open_application("Spotify")
@@ -427,18 +427,16 @@ def assistant_logic(ui):
 
             elif "skip song" in query or "next song" in query or "skip track" in query:
                 open_application("Spotify")
-                pyautogui.moveTo(723,650)
                 time.sleep(3)
-                pyautogui.click()
+                pyautogui.hotkey('ctrl', 'right')
 
             elif "previous song" in query or "last song" in query:
                 open_application("Spotify")
                 pyautogui.moveTo(643,650)
                 time.sleep(3)
-                pyautogui.click()
-                time.sleep(0.2)
-                pyautogui.click()
-            
+                pyautogui.hotkey('ctrl', 'left')
+
+
             elif "flip a coin" in query:
                 coinop = ["Heads", "Tails"]
                 coin = random.choice(coinop)
