@@ -391,11 +391,6 @@ def assistant_logic(ui):
                 speak("Screenshot taken.")
                 ui.update_text("Screenshot taken.")
 
-            elif "daily text" in query:
-                text = "https://wol.jw.org/en/wol/h/r1/lp-e"
-                webbrowser.open(text)
-                ui.update_text("Opened daily text.")
-
             elif "wolfram" in query or "calculate" in query or "what is" in query:
                 wolfram_query = query.replace("wolfram", "").replace("calculate", "").strip()
                 wolfram_answer = query_wolfram_alpha(wolfram_query)
@@ -415,28 +410,25 @@ def assistant_logic(ui):
 
             elif "play music" in query:
                 open_application("Spotify")
-                pyautogui.moveTo(683,650)
                 time.sleep(3)
-                pyautogui.press('space') 
+                pyautogui.hotkey('space')
 
             elif "pause music" in query:
                 open_application("Spotify")
-                pyautogui.moveTo(683,650)
                 time.sleep(3)
-                pyautogui.press('space') 
+                pyautogui.hotkey('space')
 
             elif "skip song" in query or "next song" in query or "skip track" in query:
                 open_application("Spotify")
                 time.sleep(3)
-                pyautogui.hotkey('ctrl', 'right')
-
-            elif "previous song" in query or "last song" in query:
-                open_application("Spotify")
-                pyautogui.moveTo(643,650)
-                time.sleep(3)
                 pyautogui.hotkey('ctrl', 'left')
 
 
+            elif "previous song" in query or "last song" in query:
+                open_application("Spotify")
+                time.sleep(3)
+                pyautogui.hotkey('ctrl', 'left')
+            
             elif "flip a coin" in query:
                 coinop = ["Heads", "Tails"]
                 coin = random.choice(coinop)
