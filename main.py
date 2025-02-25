@@ -8,7 +8,7 @@ import webbrowser
 import wolframalpha
 import psutil
 import os
-import random
+import sys
 from datetime import datetime
 from GreetMe import greetMe
 from Get_News import get_news
@@ -19,11 +19,10 @@ from application_control import open_application, close_application
 from SearchNow import searchGoogle, searchYoutube, searchWikipedia
 import tkinter as tk
 from threading import Thread
-from tkinter import messagebox
-# add system info into ui like battery cpu etc.
+from win10toast import ToastNotifier
 
 # Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "Your Wolfram ID"
+WOLFRAM_APP_ID = "Your-Api-Key"
 client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
@@ -56,6 +55,7 @@ def takeCommand(ui):
         print(f"You said: {query}\n")
     except Exception as e:
         print(e)
+        ui.update_status(f"error: {e}")  # Update status to 'error'
         return "None"
     return query
 
@@ -129,9 +129,9 @@ def get_system_stats():
         battery_status = "No battery info available (desktop or non-battery system)"
 
     return (
-        f"CPU: {cpu_usage}% |\n "
+        f"CPU: {cpu_usage}%              |\n "
         f"Memory: {memory_info.percent}% |\n "
-        f"Battery: {battery_status}"
+        f"Battery: {battery_status}      |"
     )
 
 class ToDoList:
@@ -139,7 +139,7 @@ class ToDoList:
         self.parent = parent
         self.file_path = 'todo_list.txt'
         self.frame = tk.Frame(parent, bg='black')
-        self.frame.place(relx=0.01, rely=0.01, anchor='nw', width=200, height=300)
+        self.frame.place(relx=0.01, rely=0.01, anchor='nw', width=300, height=300)
 
         self.listbox = tk.Listbox(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10))
         self.listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -147,11 +147,11 @@ class ToDoList:
         self.entry = tk.Entry(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10))
         self.entry.pack(side=tk.BOTTOM, fill=tk.X, padx=5, pady=5)
 
-        self.add_button = tk.Button(self.frame, text='Add Task', command=self.add_task, bg='blue', fg='lightblue', font=('Helvetica', 10))
-        self.add_button.pack(side=tk.BOTTOM, pady=5)
+        self.add_button = tk.Button(self.frame, text='Add Task', command=self.add_task, bg='blue', fg='lightblue', font=('Helvetica', 10), width = 15, height =1)
+        self.add_button.pack(side=tk.BOTTOM, padx=5, pady= 5)
 
-        self.remove_button = tk.Button(self.frame, text='Remove Task', command=self.remove_task, bg='red', fg='lightblue', font=('Helvetica', 10))
-        self.remove_button.pack(side=tk.BOTTOM, pady=5)
+        self.remove_button = tk.Button(self.frame, text='Remove Task', command=self.remove_task, bg='coral1', fg='blue', font=('Helvetica', 10), width = 15, height =1)
+        self.remove_button.pack(side=tk.BOTTOM, padx=5, pady=5)
 
         #load existing tasks
         self.load_tasks()
@@ -188,21 +188,44 @@ class ToDoList:
                 tasks = file.readlines()
                 for task in tasks:
                     self.listbox.insert(tk.END, task.strip())
-            
 
-    
+class BatteryMonitor:
+    def __init__(self):
+        self.notifier = ToastNotifier()
+        self.last_notification_time = 0
+        self.notification_cooldown = 300  # 5 minutes in seconds
 
-import psutil
-import tkinter as tk
+    def check_battery(self):
+        battery = psutil.sensors_battery()
+        current_time = time.time()
+        
+        if battery and battery.power_plugged and battery.percent >= 80:
+            if current_time - self.last_notification_time > self.notification_cooldown:
+                self.notifier.show_toast(
+                    "Battery Health",
+                    "Battery is above 80%. Consider unplugging to extend battery life.",
+                    duration=10,
+                    threaded=True
+                )
+                speak("Sir, battery is above 80 percent. I recommend unplugging the charger to extend battery life.")
+                self.last_notification_time = current_time
+
 
 class SystemInfo:
     def __init__(self, parent):
         self.parent = parent
         self.frame = tk.Frame(parent, bg='black')
-        self.frame.place(relx=0.01, rely=0.8, anchor='sw', width=300, height=150)
+        
+        # Remove fixed width and height, let it auto-size
+        self.frame.place(relx=0.01, rely=0.9, anchor='sw')
 
-        self.info_label = tk.Label(self.frame, bg='black', fg='lightblue', font=('Helvetica', 10), anchor='nw', justify='left')
-        self.info_label.pack(fill=tk.BOTH, expand=False)
+        # Add padding to the label for better appearance
+        self.info_label = tk.Label(self.frame, bg='black', fg='lightblue', 
+                                 font=('Helvetica', 10), anchor='w', 
+                                 justify='left', padx=5, pady=5)
+        self.info_label.pack()
+        self.battery_monitor = BatteryMonitor()
+
 
         self.update_info()
 
@@ -214,11 +237,13 @@ class SystemInfo:
         battery_status = f"{battery.percent}% remaining" if battery else "No battery info available"
         memory_usage = f"{memory.percent}% used"
 
-        info = (f"| CPU Usage: {cpu_usage}% |\n"
-                f"| Memory Usage: {memory_usage}\n"
-                f"|Battery Status: {battery_status}")
+        # Adjust the formatting to be more compact
+        info = (f"CPU Usage: {cpu_usage}%\n"
+               f"Memory Usage: {memory_usage}\n"
+               f"Battery: {battery_status}")
         self.info_label.config(text=info)
-
+        self.battery_monitor.check_battery()
+        self.parent.after(10000, self.update_info)
 
 class VoiceAssistantUI:
     """UI class for the voice assistant"""
@@ -226,6 +251,7 @@ class VoiceAssistantUI:
         self.root = root
         self.root.title("ORION MK1")
         self.root.configure(bg='black')
+        self.running = True
 
         self.canvas = tk.Canvas(root, bg='black')
         self.canvas.pack(fill=tk.BOTH, expand=True)
@@ -252,6 +278,11 @@ class VoiceAssistantUI:
 
         # Initial layout update
         self.update_layout()
+
+    def cleanup(self):
+        """Clean up resources before closing the UI"""
+        self.running = False
+        self.root.quit()
 
     def update_status(self, status):
         """Update the status text and circle color"""
@@ -295,6 +326,7 @@ class VoiceAssistantUI:
         # Update system monitor position
         self.system_monitor.place(x=10, y=height - 150)
 
+
 def toggle_fullscreen(event=None):
     """Toggle between full screen and windowed mode."""
     current_state = root.attributes("-fullscreen")
@@ -303,7 +335,7 @@ def toggle_fullscreen(event=None):
 def assistant_logic(ui):
     awake = False
 
-    while True:
+    while ui.running:
         if awake:
             ui.update_status('listening')
             query = takeCommand(ui).lower()  # Pass `ui` to `takeCommand`
@@ -329,6 +361,34 @@ def assistant_logic(ui):
             elif "thank you" in query:
                 ui.update_text("My pleasure sir")
                 speak("My pleasure sir")
+
+            elif "what is your name" in query:
+                ui.update_text("My name is Orion, sir")
+                speak("My name is Orion, sir")
+
+            elif "what can you do" in query:
+                ui.update_text("I can do a lot of things sir. Just ask me")
+                speak("I can do a lot of things sir. Just ask me")
+
+            elif "what time is it" in query or "what's the time" in query or "tell me the time" in query or "what is the time" in query:
+                current_time = datetime.now().strftime("%I:%M %p")
+                ui.update_text(f"The time is {current_time}")
+                speak(f"The time is {current_time}")
+
+            elif "what day is it" in query:
+                current_day = datetime.now().strftime("%A")
+                ui.update_text(f"Today is {current_day}")
+                speak(f"Today is {current_day}")
+
+            elif "what is the date" in query:
+                current_date = datetime.now().strftime("%B %d, %Y")
+                ui.update_text(f"Today is {current_date}")
+                speak(f"Today is {current_date}")
+
+            elif "what is the weather" in query:
+                webbrowser.open("https://www.bbc.co.uk/weather")
+                ui.update_text("Opening weather forecast")
+                speak("Opening weather forecast")
                 
             elif "set volume" in query:
                 volume_level = parse_volume_level(query)
@@ -351,18 +411,7 @@ def assistant_logic(ui):
                 else:
                     ui.update_text("Sorry, I couldn't understand the brightness level.")
                     speak("Sorry, I couldn't understand the brightness level.")
-                    
-            elif "shutdown" in query or "shut down" in query:
-                speak("Shutting down in 10 seconds")
-                ui.update_text("Shutting down in 10 seconds")
-                time.sleep(10)
-                speak("Shutting down. It was a pleasure to work with you, sir.")
-                ui.update_text("Shutting down. It was a pleasure to work with you, sir.")
-                shutdown()
-            elif "restart" in query:
-                speak("Restarting the system.")
-                ui.update_text("Restarting the system.")
-                restart()
+
             elif "open" in query:
                 app_name = query.replace("open", "")
                 ui.update_text(f"Opening application: {app_name}")
@@ -391,6 +440,11 @@ def assistant_logic(ui):
                 speak("Screenshot taken.")
                 ui.update_text("Screenshot taken.")
 
+            elif "daily text" in query:
+                text = "https://wol.jw.org/en/wol/h/r1/lp-e"
+                webbrowser.open(text)
+                ui.update_text("Opened daily text.")
+
             elif "wolfram" in query or "calculate" in query or "what is" in query:
                 wolfram_query = query.replace("wolfram", "").replace("calculate", "").strip()
                 wolfram_answer = query_wolfram_alpha(wolfram_query)
@@ -409,39 +463,110 @@ def assistant_logic(ui):
                 speak(system_stats)
 
             elif "play music" in query:
+                ui.update_text("Playing music on Spotify")
                 open_application("Spotify")
                 time.sleep(3)
                 pyautogui.hotkey('space')
+                pyautogui.hotkey('alt', 'tab')
 
             elif "pause music" in query:
+                ui.update_text("Pausing music on Spotify")
                 open_application("Spotify")
-                time.sleep(3)
+                time.sleep(2)
                 pyautogui.hotkey('space')
+                pyautogui.hotkey('alt', 'tab')
 
             elif "skip song" in query or "next song" in query or "skip track" in query:
+                ui.update_text("Skipping song on Spotify")
                 open_application("Spotify")
-                time.sleep(3)
-                pyautogui.hotkey('ctrl', 'left')
+                time.sleep(2)
+                pyautogui.hotkey('ctrl', 'right')
+                pyautogui.hotkey('alt', 'tab')
 
 
             elif "previous song" in query or "last song" in query:
+                ui.update_text("Playing previous song on Spotify")
                 open_application("Spotify")
-                time.sleep(3)
+                time.sleep(2)
                 pyautogui.hotkey('ctrl', 'left')
+                time.sleep(0.5)
+                pyautogui.hotkey('ctrl', 'left')
+                pyautogui.hotkey('alt', 'tab')
+
             
+            elif "restart song" in query or "replay song" in query:
+                ui.update_text("Restarting song on Spotify")
+                open_application("Spotify")
+                time.sleep(2)
+                pyautogui.hotkey('ctrl', 'left')
+                pyautogui.hotkey('alt', 'tab')
+
             elif "flip a coin" in query:
+                import random
                 coinop = ["Heads", "Tails"]
                 coin = random.choice(coinop)
                 ui.update_text(coin)
                 speak("Sir, I got heads.")
+
+            elif "roll a dice" in query:
+                import random
+                dice = random.randint(1, 6)
+                ui.update_text(dice)
+                speak(f"Sir, I got {dice}.")
+
+            elif "shutdown" in query or "shut down" in query:
+                speak("Shutting down in 10 seconds")
+                ui.update_text("Shutting down in 10 seconds")
+                time.sleep(10)
+                speak("Shutting down. It was a pleasure to work with you, sir.")
+                ui.update_text("Shutting down. It was a pleasure to work with you, sir.")
+                shutdown()
+                
+            elif "restart" in query:
+                speak("Restarting the system.")
+                ui.update_text("Restarting the system.")
+                restart()
+
+            elif "my windows" in query:
+                speak("Displaying the windows now, sir.")
+                ui.update_text("Displaying the windows now, sir.")
+                pyautogui.hotkey('win', 'tab')
+
+            elif "show taskbar" in query:
+                speak("Hiding the taskbar.")
+                ui.update_text("Hiding the taskbar.")
+                pyautogui.hotkey('win', 'b')
+
+            elif "show start menu" in query:
+                speak("Opening the start menu.")
+                ui.update_text("Opening the start menu.")
+                pyautogui.hotkey('win')
+
+            elif "show action center" in query or "show notifications" in query:
+                speak("Opening the action center.")
+                ui.update_text("Opening the action center.")
+                pyautogui.hotkey('win', 'a')
+
+            elif "show desktop" in query:
+                speak("Minimizing all windows to show desktop.")
+                ui.update_text("Minimizing all windows to show desktop.")
+                pyautogui.hotkey('win', 'd')
+
+            elif "add desktop" in query:
+                ui.update_text("Adding a new desktop.")
+                speak("Adding a new desktop.")
+                pyautogui.hotkey('win', 'ctrl', 'd')
                 
             else:
-                speak("Sorry, I didn't understand that command. Could you please repeat it?")
+                speak("Sorry, I didn't understand that command. Could you please repeat it, sir?")
                 ui.update_text("Sorry, I didn't understand that command. Could you please repeat it?")
+
+                if not ui.running:
+                    break
         else:
             ui.update_status('idle')
             query = takeCommand(ui).lower()
-            if "wake up" in query:
+            if "wake up" in query or "arise" in query:
                 greetMe()
                 awake = True
                 ui.update_status('listening')
@@ -453,7 +578,15 @@ def assistant_logic(ui):
 def main():
     global root
     root = tk.Tk()
+    root.iconbitmap('logo.ico')
     ui = VoiceAssistantUI(root)
+
+    def on_closing():
+        ui.cleanup()
+        root.destroy()
+        sys.exit()
+
+    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     # Set the window to full screen
     root.attributes("-fullscreen", True)
