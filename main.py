@@ -9,6 +9,15 @@ import wolframalpha
 import psutil
 import os
 import sys
+import random
+import subprocess
+import json
+import ollama
+import threading
+import queue
+import re
+import requests
+import pyperclip
 from datetime import datetime
 from GreetMe import greetMe
 from Get_News import get_news
@@ -20,10 +29,8 @@ from SearchNow import searchGoogle, searchYoutube, searchWikipedia
 import tkinter as tk
 from threading import Thread
 from win10toast import ToastNotifier
+from pushbullet import Pushbullet
 
-# Initialize WolframAlpha Client
-WOLFRAM_APP_ID = "Your-Api-Key"
-client = wolframalpha.Client(WOLFRAM_APP_ID)
 
 # Initialize the text-to-speech engine
 engine = pyttsx3.init('sapi5')
@@ -32,10 +39,27 @@ engine.setProperty("voice", voices[0].id)
 engine.setProperty("rate", 170)
 engine.setProperty("volume", 1.0)  # Set volume to maximum
 
+api_key = 'Your API key'
+pb = Pushbullet(api_key)
+
+speak_queue = queue.Queue()
+
+def speak_worker():
+    while True:
+        text = speak_queue.get()
+        if text is None:
+            break
+        engine.say(text)
+        engine.runAndWait()
+        speak_queue.task_done()
+
+# Start the speaking thread when program starts
+speaking_thread = Thread(target=speak_worker, daemon=True)
+speaking_thread.start()
+
 def speak(audio):
-    """Text-to-speech function"""
-    engine.say(audio)
-    engine.runAndWait()
+    """Non-blocking text-to-speech function"""
+    speak_queue.put(audio)
 
 def takeCommand(ui):
     """Listen to a command and return the text"""
@@ -107,15 +131,119 @@ def detect_clap(threshold=0.5, duration=0.1, clap_count=2):
     with sd.InputStream(callback=callback):
         sd.sleep(int(duration * 1000))
 
-def query_wolfram_alpha(query):
-    """Query Wolfram Alpha and return the result"""
+
+def ask_phi3(user_input, ui):
+    """Stream response from O.R.I.O.N and speak in chunks"""
     try:
-        res = client.query(query)
-        answer = next(res.results).text
-        return answer
+        response = ollama.chat(
+            model='Orion:latest',
+            messages=[{'role': 'user', 'content': user_input}],
+            stream=True
+        )
+        
+        full_text = ""
+        buffer = ""
+        
+        for chunk in response:
+            if not chunk or 'message' not in chunk:
+                continue
+                
+            text = chunk['message'].get('content', '')
+            buffer += text
+            full_text += text
+            
+            # Update UI with accumulated text
+            ui.update_text(full_text)
+            ui.root.update_idletasks()
+            
+            # Speak complete sentences
+            if any(p in buffer for p in ['.', '!', '?']):
+                sentences = re.split(r'([.!?])', buffer)
+                buffer = ""
+                
+                for i in range(0, len(sentences)-1, 2):
+                    sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else '')
+                    if sentence.strip():
+                        speak(sentence.strip())
+        
+        # Speak any remaining text
+        if buffer.strip():
+            speak(buffer.strip())
+            
+        return full_text
+        
     except Exception as e:
-        print(f"Error querying Wolfram Alpha: {e}")
-        return "Sorry, I couldn't retrieve information from Wolfram Alpha."
+        error_msg = f"Sorry, I encountered an error: {str(e)}"
+        speak(error_msg)
+        return error_msg
+
+def get_active_url():
+    """Copies the URL from the current active browser window."""
+    pyautogui.hotkey('ctrl', 'l')  # Focus address bar
+    time.sleep(0.1)
+    pyautogui.hotkey('ctrl', 'c')  # Copy
+    time.sleep(0.1)
+    url = pyperclip.paste()
+    return url
+
+def summarize_url(url):
+    """Sends the URL to Phi4-Mini and streams back a spoken summary."""
+    # Prompt sent to Phi4-mini
+    prompt = f"Summarize the following webpage in a few sentences: {url}"
+    
+    # Ollama API endpoint
+    api_url = "http://localhost:11434/api/chat"
+    
+    payload = {
+        "model": "Orion",  # or whatever your model is named I modified Phi4-Mini
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True
+    }
+
+    # Start request
+    try:
+        with requests.post(api_url, json=payload, stream=True, timeout=60) as response:
+            response.raise_for_status()
+
+            buffer = ""
+            for line in response.iter_lines():
+                if line:
+                    # Decode the streamed JSON
+                    decoded_line = line.decode('utf-8')
+                    if decoded_line.startswith("data: "):
+                        content_piece = decoded_line[6:]
+                        
+                        if '"done":true' in content_piece:
+                            break
+
+                        try:
+                            content_json = eval(content_piece)  # safe because Ollama format
+                            chunk = content_json.get("message", {}).get("content", "")
+                            buffer += chunk
+
+                            # If buffer contains a complete sentence
+                            while any(punct in buffer for punct in [".", "!", "?"]):
+                                for punct in [".", "!", "?"]:
+                                    if punct in buffer:
+                                        sentence, buffer = buffer.split(punct, 1)
+                                        full_sentence = (sentence + punct).strip()
+                                        if full_sentence:
+                                            print(f"[SPEAKING] {full_sentence}")
+                                            speak(full_sentence)
+                                        break
+                        except Exception as e:
+                            print(f"Error parsing chunk: {e}")
+
+            # If anything is left over at the end
+            if buffer.strip():
+                print(f"[SPEAKING] {buffer.strip()}")
+                speak(buffer.strip())
+
+    except requests.exceptions.RequestException as e:
+        print(f"Request error: {e}")
+        speak("Sorry, I couldn't summarize the page.")
+
+
     
 def get_system_stats():
     cpu_usage = psutil.cpu_percent(interval=1)
@@ -133,6 +261,35 @@ def get_system_stats():
         f"Memory: {memory_info.percent}% |\n "
         f"Battery: {battery_status}      |"
     )
+
+MEMORY_FILE = "memory.json"
+
+def remember(key, value):
+    # Load existing memory or create new
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            data = json.load(f)
+    else:
+        data = {}
+
+    # Save new memory
+    data[key.lower()] = value
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def recall(key):
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            data = json.load(f)
+        key = key.lower()
+        if key in data:
+            return f"{key} is {data[key]}"
+        else:
+            return f"I don't remember anything about {key}."
+    else:
+        return "I don't have any memory stored yet."
+
+
 
 class ToDoList:
     def __init__(self, parent):
@@ -191,8 +348,8 @@ class ToDoList:
 
 class BatteryMonitor:
     def __init__(self):
-        self.notifier = ToastNotifier()
-        self.last_notification_time = 0
+        self.notifier = ToastNotifier()  # Initialize the notification system
+        self.last_notification_time = 3
         self.notification_cooldown = 300  # 5 minutes in seconds
 
     def check_battery(self):
@@ -201,13 +358,26 @@ class BatteryMonitor:
         
         if battery and battery.power_plugged and battery.percent >= 80:
             if current_time - self.last_notification_time > self.notification_cooldown:
-                self.notifier.show_toast(
+                self.notifier.show_toast(  # Use the notifier to display a notification
                     "Battery Health",
                     "Battery is above 80%. Consider unplugging to extend battery life.",
                     duration=10,
                     threaded=True
                 )
+                pb.push_note("O.R.I.O.N", "Battery is above 80%. Consider unplugging to extend battery life.")
                 speak("Sir, battery is above 80 percent. I recommend unplugging the charger to extend battery life.")
+                self.last_notification_time = current_time
+
+        elif battery and not battery.power_plugged and battery.percent <= 30:
+            if current_time - self.last_notification_time > self.notification_cooldown:
+                self.notifier.show_toast(  # Use the notifier to display a notification
+                    "Battery Health",
+                    "Battery is below 30%. Consider unplugging to extend battery life.",
+                    duration=10,
+                    threaded=True
+                )
+                pb.push_note("O.R.I.O.N", "Battery is below 30%. Consider plugging in the device")
+                speak("Sir, battery is below 30 percent. I recommend plugging in the device.")
                 self.last_notification_time = current_time
 
 
@@ -243,7 +413,7 @@ class SystemInfo:
                f"Battery: {battery_status}")
         self.info_label.config(text=info)
         self.battery_monitor.check_battery()
-        self.parent.after(10000, self.update_info)
+        self.parent.after(100, self.update_info) # updates system stats every second
 
 class VoiceAssistantUI:
     """UI class for the voice assistant"""
@@ -256,13 +426,21 @@ class VoiceAssistantUI:
         self.canvas = tk.Canvas(root, bg='black')
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Define circle position and size relative to window size
-        self.circle = self.canvas.create_oval(0, 0, 100, 100, outline='blue', width=5)
+        # Frame to simulate a colored border around the input box
+        self.input_frame = tk.Frame(root, bg='blue', bd=2)
+        self.input_box = tk.Entry(self.input_frame, bg='black', fg='lightblue', 
+                                insertbackground='lightblue', font=('Helvetica', 12),
+                                bd=0, relief=tk.FLAT)
+        self.input_box.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
-
+        self.input_box.pack(fill=tk.BOTH, expand=True)
+        self.input_box.bind('<Return>', self.handle_input)
 
         # Create a Text widget inside the circle
         self.text_box = tk.Text(root, wrap=tk.WORD, bg='black', fg='lightblue', font=('Helvetica', 12), bd=0, relief=tk.FLAT)
+
+        # Define circle position and size relative to window size
+        self.circle = self.canvas.create_oval(0, 0, 100, 100, outline='blue', width=5)
         
         # Create status text widget
         self.status_text = self.canvas.create_text(0, 0, text="Idle", fill='lightblue', font=('Helvetica', 12))
@@ -276,6 +454,8 @@ class VoiceAssistantUI:
         # Initialize system monitoring widget
         self.system_monitor = tk.Label(root, bg='black', fg='lightblue', font=('Helvetica', 10), anchor='sw', justify='left')
 
+        self.keyboard_input = None  # Add this to __init__
+
         # Initial layout update
         self.update_layout()
 
@@ -288,11 +468,14 @@ class VoiceAssistantUI:
         """Update the status text and circle color"""
         self.canvas.itemconfig(self.status_text, text=status.capitalize())
         if status == 'listening':
-            self.canvas.itemconfig(self.circle, outline='blue')
+            color = 'blue'
         elif status == 'understanding':
-            self.canvas.itemconfig(self.circle, outline='red')
+            color = 'red'  
         else:
-            self.canvas.itemconfig(self.circle, outline='lightblue')
+            color = 'lightblue'
+            
+        self.canvas.itemconfig(self.circle, outline=color)
+        self.input_frame.configure(bg=color)  # Update input frame border color
 
     def update_text(self, text):
         """Update the text box with command outputs"""
@@ -326,6 +509,20 @@ class VoiceAssistantUI:
         # Update system monitor position
         self.system_monitor.place(x=10, y=height - 150)
 
+        # Update its position and size based on current window size
+        frame_height = 40  # Increased height for better text visibility
+        self.input_frame.place(relx=0.5, rely=0.85, anchor='center', 
+                             width=int(self.root.winfo_width() * 0.5), 
+                             height=frame_height)
+
+    def handle_input(self, event):
+        """Handle keyboard input when user presses Enter"""
+        query = self.input_box.get().strip().lower()
+        self.input_box.delete(0, tk.END)
+        if query:
+            self.keyboard_input = query  # Store the keyboard input
+            self.update_status("understanding")
+            print(f"Keyboard input received: {query}")
 
 def toggle_fullscreen(event=None):
     """Toggle between full screen and windowed mode."""
@@ -334,13 +531,19 @@ def toggle_fullscreen(event=None):
 
 def assistant_logic(ui):
     awake = False
-
     while ui.running:
         if awake:
             ui.update_status('listening')
-            query = takeCommand(ui).lower()  # Pass `ui` to `takeCommand`
-            if query == "none":
-                continue
+            
+            if ui.keyboard_input:  # Check for keyboard input first
+                query = ui.keyboard_input
+                ui.keyboard_input = None  # Clear the keyboard input after using it
+            else:
+                query = takeCommand(ui).lower()  # Fallback to voice input
+                if query == "none":
+                    continue
+            
+            # Process the query (rest of the command handling)
             if "go to sleep" in query:
                 ui.update_text("Alright sir, I will be available anytime")
                 speak("Alright sir, I will be available anytime")
@@ -445,12 +648,6 @@ def assistant_logic(ui):
                 webbrowser.open(text)
                 ui.update_text("Opened daily text.")
 
-            elif "wolfram" in query or "calculate" in query or "what is" in query:
-                wolfram_query = query.replace("wolfram", "").replace("calculate", "").strip()
-                wolfram_answer = query_wolfram_alpha(wolfram_query)
-                speak(wolfram_answer)
-                ui.update_text(wolfram_answer)
-
             elif "latest news" in query:
                 speak("Here is the latest news sir.")
                 print(*get_news(),sep="\n")
@@ -483,7 +680,6 @@ def assistant_logic(ui):
                 pyautogui.hotkey('ctrl', 'right')
                 pyautogui.hotkey('alt', 'tab')
 
-
             elif "previous song" in query or "last song" in query:
                 ui.update_text("Playing previous song on Spotify")
                 open_application("Spotify")
@@ -493,7 +689,6 @@ def assistant_logic(ui):
                 pyautogui.hotkey('ctrl', 'left')
                 pyautogui.hotkey('alt', 'tab')
 
-            
             elif "restart song" in query or "replay song" in query:
                 ui.update_text("Restarting song on Spotify")
                 open_application("Spotify")
@@ -502,14 +697,12 @@ def assistant_logic(ui):
                 pyautogui.hotkey('alt', 'tab')
 
             elif "flip a coin" in query:
-                import random
                 coinop = ["Heads", "Tails"]
                 coin = random.choice(coinop)
                 ui.update_text(coin)
                 speak("Sir, I got heads.")
 
             elif "roll a dice" in query:
-                import random
                 dice = random.randint(1, 6)
                 ui.update_text(dice)
                 speak(f"Sir, I got {dice}.")
@@ -556,11 +749,37 @@ def assistant_logic(ui):
                 ui.update_text("Adding a new desktop.")
                 speak("Adding a new desktop.")
                 pyautogui.hotkey('win', 'ctrl', 'd')
+
+            elif "orion" in query or "tell me" in query:
+                say = ["One moment while I analyze that.","Sir, I'm processing your request now.","Let me think about that...","Compiling a response, Sir...", "Just a moment sir...", "Gimme a second sir..."]
+                say = random.choice(say)
+                ui.update_text(say)
+                speak(say)
+                response = ask_phi3(query, ui)
+                # print(response)
+                # ui.update_text(response)
+                # speak(response)
+
+
+            elif "remember that" in query:
+                key = query.lower().split("remember that")[-1].strip()
+                if "is" in key:
+                    k, v = key.split("is", 1)
+                    remember(k.strip(), v.strip())
+                    ui.update_text(f"Got it, sir. I'll remember that {k.strip()} is {v.strip()}.")
+                    speak(f"Got it, sir. I'll remember that {k.strip()} is {v.strip()}.")
+                else:
+                    ui.update_text("Sorry, I didn't understand that. Please use the format 'remember that [key] is [value]'.")
+                    speak("Sorry, I didn't understand that. Please use the format 'remember that [key] is [value]'.")
+
+            elif "what is" in query.lower():
+                key = query.lower().split("what is")[-1].strip()
+                response = recall(key)
+                speak(response)
                 
             else:
                 speak("Sorry, I didn't understand that command. Could you please repeat it, sir?")
                 ui.update_text("Sorry, I didn't understand that command. Could you please repeat it?")
-
                 if not ui.running:
                     break
         else:
