@@ -1,23 +1,11 @@
-import pyttsx3
 import speech_recognition as sr
 import time
 import sounddevice as sd
 import numpy as np
 import pyautogui
 import webbrowser
-import wolframalpha
 import psutil
 import os
-import sys
-import random
-import subprocess
-import json
-import ollama
-import threading
-import queue
-import re
-import requests
-import pyperclip
 from datetime import datetime
 from GreetMe import greetMe
 from Get_News import get_news
@@ -28,38 +16,43 @@ from application_control import open_application, close_application
 from SearchNow import searchGoogle, searchYoutube, searchWikipedia
 import tkinter as tk
 from threading import Thread
-from win10toast import ToastNotifier
-from pushbullet import Pushbullet
+import inspect
+import asyncio
+import edge_tts
+import pygame
+import os
+from datetime import datetime
 
+# Internal async function
+async def _speak_async(text, voice="en-GB-RyanNeural"):
+    # Generate a unique filename using timestamp
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    filename = f"temp_{timestamp}.mp3"
 
-# Initialize the text-to-speech engine
-engine = pyttsx3.init('sapi5')
-voices = engine.getProperty("voices")
-engine.setProperty("voice", voices[0].id)
-engine.setProperty("rate", 170)
-engine.setProperty("volume", 1.0)  # Set volume to maximum
+    # Generate TTS audio
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(filename)
 
-api_key = 'Your API key'
-pb = Pushbullet(api_key)
+    # Initialize pygame mixer and play
+    pygame.mixer.init()
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
 
-speak_queue = queue.Queue()
+    # Wait until audio finishes
+    while pygame.mixer.music.get_busy():
+        await asyncio.sleep(0.1)
 
-def speak_worker():
-    while True:
-        text = speak_queue.get()
-        if text is None:
-            break
-        engine.say(text)
-        engine.runAndWait()
-        speak_queue.task_done()
+    # Stop the mixer before removing file
+    pygame.mixer.music.stop()
+    pygame.mixer.quit()
 
-# Start the speaking thread when program starts
-speaking_thread = Thread(target=speak_worker, daemon=True)
-speaking_thread.start()
+    # Now it’s safe to remove
+    os.remove(filename)
 
-def speak(audio):
-    """Non-blocking text-to-speech function"""
-    speak_queue.put(audio)
+# Synchronous wrapper
+def speak(text, voice="en-GB-RyanNeural"):
+    asyncio.run(_speak_async(text, voice))
+
 
 def takeCommand(ui):
     """Listen to a command and return the text"""
@@ -70,14 +63,31 @@ def takeCommand(ui):
         ui.update_status('listening')  # Update status to 'listening'
         r.pause_threshold = 1
         r.energy_threshold = 300
-        audio = r.listen(source, timeout=None)
+        # Wait up to 5 seconds for the user to start speaking (timeout)
+        # Once speech starts, do not limit the phrase duration so the recognizer
+        # listens until it detects the user has finished speaking (end-of-speech)
+        try:
+            audio = r.listen(source, timeout=5, phrase_time_limit=None)
+        except sr.WaitTimeoutError:
+            # No speech was detected within the timeout window
+            return "None"
 
     try:
         print("Understanding")
         ui.update_status('understanding')  # Update status to 'understanding'
         query = r.recognize_google(audio, language='en-GB')
-        print(f"You said: {query}\n")
+    except sr.UnknownValueError:
+        # Speech was unintelligible
+        print("Could not understand audio")
+        ui.update_status('error')
+        return "None"
+    except sr.RequestError as e:
+        # API was unreachable or unresponsive
+        print(f"Could not request results; {e}")
+        ui.update_status(f"error: {e}")
+        return "None"
     except Exception as e:
+        # Generic fallback
         print(e)
         ui.update_status(f"error: {e}")  # Update status to 'error'
         return "None"
@@ -112,138 +122,6 @@ def parse_brightness_level(query):
         elif word in number_words:
             return number_words[word]
     return None
-
-def detect_clap(threshold=0.5, duration=0.1, clap_count=2):
-    """Detect double clap sound to activate Orion"""
-    clap_times = []
-
-    def callback(indata, frames, time, status):
-        volume_norm = np.linalg.norm(indata) * 10
-        if volume_norm > threshold:
-            clap_times.append(time.inputBufferAdcTime)
-            if len(clap_times) > clap_count:
-                clap_times.pop(0)
-            if len(clap_times) == clap_count and (clap_times[-1] - clap_times[0]) < 1:
-                print("Double clap detected!")
-                return True
-        return False
-
-    with sd.InputStream(callback=callback):
-        sd.sleep(int(duration * 1000))
-
-
-def ask_phi3(user_input, ui):
-    """Stream response from O.R.I.O.N and speak in chunks"""
-    try:
-        response = ollama.chat(
-            model='Orion:latest',
-            messages=[{'role': 'user', 'content': user_input}],
-            stream=True
-        )
-        
-        full_text = ""
-        buffer = ""
-        
-        for chunk in response:
-            if not chunk or 'message' not in chunk:
-                continue
-                
-            text = chunk['message'].get('content', '')
-            buffer += text
-            full_text += text
-            
-            # Update UI with accumulated text
-            ui.update_text(full_text)
-            ui.root.update_idletasks()
-            
-            # Speak complete sentences
-            if any(p in buffer for p in ['.', '!', '?']):
-                sentences = re.split(r'([.!?])', buffer)
-                buffer = ""
-                
-                for i in range(0, len(sentences)-1, 2):
-                    sentence = sentences[i] + (sentences[i+1] if i+1 < len(sentences) else '')
-                    if sentence.strip():
-                        speak(sentence.strip())
-        
-        # Speak any remaining text
-        if buffer.strip():
-            speak(buffer.strip())
-            
-        return full_text
-        
-    except Exception as e:
-        error_msg = f"Sorry, I encountered an error: {str(e)}"
-        speak(error_msg)
-        return error_msg
-
-def get_active_url():
-    """Copies the URL from the current active browser window."""
-    pyautogui.hotkey('ctrl', 'l')  # Focus address bar
-    time.sleep(0.1)
-    pyautogui.hotkey('ctrl', 'c')  # Copy
-    time.sleep(0.1)
-    url = pyperclip.paste()
-    return url
-
-def summarize_url(url):
-    """Sends the URL to Phi4-Mini and streams back a spoken summary."""
-    # Prompt sent to Phi4-mini
-    prompt = f"Summarize the following webpage in a few sentences: {url}"
-    
-    # Ollama API endpoint
-    api_url = "http://localhost:11434/api/chat"
-    
-    payload = {
-        "model": "Orion",  # or whatever your model is named I modified Phi4-Mini
-        "messages": [{"role": "user", "content": prompt}],
-        "stream": True
-    }
-
-    # Start request
-    try:
-        with requests.post(api_url, json=payload, stream=True, timeout=60) as response:
-            response.raise_for_status()
-
-            buffer = ""
-            for line in response.iter_lines():
-                if line:
-                    # Decode the streamed JSON
-                    decoded_line = line.decode('utf-8')
-                    if decoded_line.startswith("data: "):
-                        content_piece = decoded_line[6:]
-                        
-                        if '"done":true' in content_piece:
-                            break
-
-                        try:
-                            content_json = eval(content_piece)  # safe because Ollama format
-                            chunk = content_json.get("message", {}).get("content", "")
-                            buffer += chunk
-
-                            # If buffer contains a complete sentence
-                            while any(punct in buffer for punct in [".", "!", "?"]):
-                                for punct in [".", "!", "?"]:
-                                    if punct in buffer:
-                                        sentence, buffer = buffer.split(punct, 1)
-                                        full_sentence = (sentence + punct).strip()
-                                        if full_sentence:
-                                            print(f"[SPEAKING] {full_sentence}")
-                                            speak(full_sentence)
-                                        break
-                        except Exception as e:
-                            print(f"Error parsing chunk: {e}")
-
-            # If anything is left over at the end
-            if buffer.strip():
-                print(f"[SPEAKING] {buffer.strip()}")
-                speak(buffer.strip())
-
-    except requests.exceptions.RequestException as e:
-        print(f"Request error: {e}")
-        speak("Sorry, I couldn't summarize the page.")
-
-
     
 def get_system_stats():
     cpu_usage = psutil.cpu_percent(interval=1)
@@ -261,35 +139,6 @@ def get_system_stats():
         f"Memory: {memory_info.percent}% |\n "
         f"Battery: {battery_status}      |"
     )
-
-MEMORY_FILE = "memory.json"
-
-def remember(key, value):
-    # Load existing memory or create new
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            data = json.load(f)
-    else:
-        data = {}
-
-    # Save new memory
-    data[key.lower()] = value
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(data, f, indent=4)
-
-def recall(key):
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            data = json.load(f)
-        key = key.lower()
-        if key in data:
-            return f"{key} is {data[key]}"
-        else:
-            return f"I don't remember anything about {key}."
-    else:
-        return "I don't have any memory stored yet."
-
-
 
 class ToDoList:
     def __init__(self, parent):
@@ -346,40 +195,6 @@ class ToDoList:
                 for task in tasks:
                     self.listbox.insert(tk.END, task.strip())
 
-class BatteryMonitor:
-    def __init__(self):
-        self.notifier = ToastNotifier()  # Initialize the notification system
-        self.last_notification_time = 3
-        self.notification_cooldown = 300  # 5 minutes in seconds
-
-    def check_battery(self):
-        battery = psutil.sensors_battery()
-        current_time = time.time()
-        
-        if battery and battery.power_plugged and battery.percent >= 80:
-            if current_time - self.last_notification_time > self.notification_cooldown:
-                self.notifier.show_toast(  # Use the notifier to display a notification
-                    "Battery Health",
-                    "Battery is above 80%. Consider unplugging to extend battery life.",
-                    duration=10,
-                    threaded=True
-                )
-                pb.push_note("O.R.I.O.N", "Battery is above 80%. Consider unplugging to extend battery life.")
-                speak("Sir, battery is above 80 percent. I recommend unplugging the charger to extend battery life.")
-                self.last_notification_time = current_time
-
-        elif battery and not battery.power_plugged and battery.percent <= 30:
-            if current_time - self.last_notification_time > self.notification_cooldown:
-                self.notifier.show_toast(  # Use the notifier to display a notification
-                    "Battery Health",
-                    "Battery is below 30%. Consider unplugging to extend battery life.",
-                    duration=10,
-                    threaded=True
-                )
-                pb.push_note("O.R.I.O.N", "Battery is below 30%. Consider plugging in the device")
-                speak("Sir, battery is below 30 percent. I recommend plugging in the device.")
-                self.last_notification_time = current_time
-
 
 class SystemInfo:
     def __init__(self, parent):
@@ -394,8 +209,6 @@ class SystemInfo:
                                  font=('Helvetica', 10), anchor='w', 
                                  justify='left', padx=5, pady=5)
         self.info_label.pack()
-        self.battery_monitor = BatteryMonitor()
-
 
         self.update_info()
 
@@ -412,8 +225,7 @@ class SystemInfo:
                f"Memory Usage: {memory_usage}\n"
                f"Battery: {battery_status}")
         self.info_label.config(text=info)
-        self.battery_monitor.check_battery()
-        self.parent.after(100, self.update_info) # updates system stats every second
+        self.parent.after(10000, self.update_info)
 
 class VoiceAssistantUI:
     """UI class for the voice assistant"""
@@ -421,26 +233,17 @@ class VoiceAssistantUI:
         self.root = root
         self.root.title("ORION MK1")
         self.root.configure(bg='black')
-        self.running = True
 
         self.canvas = tk.Canvas(root, bg='black')
         self.canvas.pack(fill=tk.BOTH, expand=True)
 
-        # Frame to simulate a colored border around the input box
-        self.input_frame = tk.Frame(root, bg='blue', bd=2)
-        self.input_box = tk.Entry(self.input_frame, bg='black', fg='lightblue', 
-                                insertbackground='lightblue', font=('Helvetica', 12),
-                                bd=0, relief=tk.FLAT)
-        self.input_box.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        # Define circle position and size relative to window size
+        self.circle = self.canvas.create_oval(0, 0, 100, 100, outline='blue', width=5)
 
-        self.input_box.pack(fill=tk.BOTH, expand=True)
-        self.input_box.bind('<Return>', self.handle_input)
+
 
         # Create a Text widget inside the circle
         self.text_box = tk.Text(root, wrap=tk.WORD, bg='black', fg='lightblue', font=('Helvetica', 12), bd=0, relief=tk.FLAT)
-
-        # Define circle position and size relative to window size
-        self.circle = self.canvas.create_oval(0, 0, 100, 100, outline='blue', width=5)
         
         # Create status text widget
         self.status_text = self.canvas.create_text(0, 0, text="Idle", fill='lightblue', font=('Helvetica', 12))
@@ -454,28 +257,18 @@ class VoiceAssistantUI:
         # Initialize system monitoring widget
         self.system_monitor = tk.Label(root, bg='black', fg='lightblue', font=('Helvetica', 10), anchor='sw', justify='left')
 
-        self.keyboard_input = None  # Add this to __init__
-
         # Initial layout update
         self.update_layout()
-
-    def cleanup(self):
-        """Clean up resources before closing the UI"""
-        self.running = False
-        self.root.quit()
 
     def update_status(self, status):
         """Update the status text and circle color"""
         self.canvas.itemconfig(self.status_text, text=status.capitalize())
         if status == 'listening':
-            color = 'blue'
+            self.canvas.itemconfig(self.circle, outline='blue')
         elif status == 'understanding':
-            color = 'red'  
+            self.canvas.itemconfig(self.circle, outline='red')
         else:
-            color = 'lightblue'
-            
-        self.canvas.itemconfig(self.circle, outline=color)
-        self.input_frame.configure(bg=color)  # Update input frame border color
+            self.canvas.itemconfig(self.circle, outline='lightblue')
 
     def update_text(self, text):
         """Update the text box with command outputs"""
@@ -509,303 +302,296 @@ class VoiceAssistantUI:
         # Update system monitor position
         self.system_monitor.place(x=10, y=height - 150)
 
-        # Update its position and size based on current window size
-        frame_height = 40  # Increased height for better text visibility
-        self.input_frame.place(relx=0.5, rely=0.85, anchor='center', 
-                             width=int(self.root.winfo_width() * 0.5), 
-                             height=frame_height)
-
-    def handle_input(self, event):
-        """Handle keyboard input when user presses Enter"""
-        query = self.input_box.get().strip().lower()
-        self.input_box.delete(0, tk.END)
-        if query:
-            self.keyboard_input = query  # Store the keyboard input
-            self.update_status("understanding")
-            print(f"Keyboard input received: {query}")
-
 def toggle_fullscreen(event=None):
     """Toggle between full screen and windowed mode."""
     current_state = root.attributes("-fullscreen")
     root.attributes("-fullscreen", not current_state)
 
-def assistant_logic(ui):
+def time_function(ui):
+    current_time = datetime.now().strftime("%I:%M %p")
+    ui.update_text(f"The time is {current_time}")
+    speak(f"The time is {current_time}")
+
+def date_function(ui):
+    current_date = datetime.now().strftime("%B %d, %Y")
+    ui.update_text(f"Today is {current_date}")
+    speak(f"Today is {current_date}")
+
+def weather_function(ui):
+    webbrowser.open("https://www.bbc.co.uk/weather")
+    ui.update_text("Opening weather forecast")
+    speak("Opening weather forecast")
+
+def volume_function(ui, query):
+    """Set system volume from a spoken query like 'set volume to 50'."""
+    volume_level = parse_volume_level(query)
+    if volume_level is not None:
+        # set_volume expects a 0.0-1.0 float
+        set_volume(max(0.0, min(1.0, volume_level / 100)))
+        ui.update_text(f"Volume level set to {volume_level} percent")
+        speak(f"Volume level set to {volume_level} percent")
+    else:
+        ui.update_text("Sorry, I couldn't understand the volume level.")
+        speak("Sorry, I couldn't understand the volume level.")
+
+def brightness_function(ui, query):
+    """Set screen brightness from a spoken query like 'set brightness to 70'."""
+    brightness_level = parse_brightness_level(query)
+    if brightness_level is not None:
+        # clamp to 0-100
+        brightness_level = max(0, min(100, brightness_level))
+        set_brightness(brightness_level)
+        ui.update_text(f"Brightness level set to {brightness_level} percent")
+        speak(f"Brightness level set to {brightness_level} percent")
+    else:
+        ui.update_text("Sorry, I couldn't understand the brightness level.")
+        speak("Sorry, I couldn't understand the brightness level.")
+
+def app_opening(ui, query):
+    app_name = query.replace("open", "").strip()
+    ui.update_text(f"Opening application: {app_name}")
+    open_application(app_name)
+    speak(f"Opening application: {app_name}")
+
+def app_closing(ui, query):
+    app_name = query.replace("close", "").strip()
+    close_application(app_name)
+    ui.update_text(f"Closing application: {app_name}")
+    speak(f"Closing application: {app_name}")
+    
+def screenshot_function(ui):
+    # Create screenshots directory if it doesn't exist
+    screenshots_dir = os.path.join(os.path.dirname(__file__), "screenshots")
+    if not os.path.exists(screenshots_dir):
+        os.makedirs(screenshots_dir)
+    
+    current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    screenshot = pyautogui.screenshot()
+    screenshot_path = os.path.join(screenshots_dir, f"screenshot_{current_time}.png")
+    screenshot.save(screenshot_path)
+    speak("Screenshot taken and saved in screenshots folder.")
+    ui.update_text("Screenshot taken and saved in screenshots folder.")
+
+def daily_text_function(ui):
+    text = "https://wol.jw.org/en/wol/h/r1/lp-e"
+    webbrowser.open(text)
+    ui.update_text("Opened daily text.")
+    speak("Opened daily text.")
+
+def news_function(ui):
+    speak("Here is the latest news sir.")
+    news_items = get_news()
+    # Convert news items to a formatted string
+    news_text = "\n".join(str(item) for item in news_items)
+    print(news_text)
+    ui.update_text(news_text)
+    speak(news_text)
+
+def play_music_function(ui):
+    ui.update_text("Playing music on Spotify")
+    open_application("Spotify")
+    time.sleep(3)
+    pyautogui.hotkey('space')
+    pyautogui.hotkey('alt', 'tab')
+
+def pause_music_function(ui):
+    ui.update_text("Pausing music on Spotify")
+    open_application("Spotify")
+    time.sleep(2)
+    pyautogui.hotkey('space')
+    pyautogui.hotkey('alt', 'tab')
+
+def skip_song_function(ui):
+    ui.update_text("Skipping song on Spotify")
+    open_application("Spotify")
+    time.sleep(2)
+    pyautogui.hotkey('ctrl', 'right')
+    pyautogui.hotkey('alt', 'tab')
+
+def previous_song_function(ui):
+    ui.update_text("Playing previous song on Spotify")
+    open_application("Spotify")
+    time.sleep(2)
+    pyautogui.hotkey('ctrl', 'left')
+    time.sleep(0.5)
+    pyautogui.hotkey('ctrl', 'left')
+    pyautogui.hotkey('alt', 'tab')
+
+def restart_song_function(ui):
+    ui.update_text("Restarting song on Spotify")
+    open_application("Spotify")
+    time.sleep(2)
+    pyautogui.hotkey('ctrl', 'left')
+    pyautogui.hotkey('alt', 'tab')
+    
+def system_stats_function(ui):
+    system_stats = get_system_stats()
+    ui.update_text(system_stats)
+    speak(system_stats)
+
+def flip_coin_function(ui):
+    import random
+    coinop = ["Heads", "Tails"]
+    coin = random.choice(coinop)
+    ui.update_text(coin)
+    speak(f"Sir, I got {coin}.")
+
+def shutdown_function(ui):
+    speak("Shutting down in 10 seconds")
+    ui.update_text("Shutting down in 10 seconds")
+    time.sleep(10)
+    speak("Shutting down. It was a pleasure to work with you, sir.")
+    ui.update_text("Shutting down. It was a pleasure to work with you, sir.")
+    shutdown()
+
+def restart_function(ui):
+    speak("Restarting the system.")
+    ui.update_text("Restarting the system.")
+    restart()
+
+def display_windows(ui):
+    speak("Displaying the windows now, sir.")
+    ui.update_text("Displaying the windows now, sir.")
+    pyautogui.hotkey('win', 'tab')
+
+def go_to_sleep(ui):
+    global awake
+    ui.update_text("Alright sir, I will be available anytime")
+    speak("Alright sir, I will be available anytime")
     awake = False
-    while ui.running:
-        if awake:
-            ui.update_status('listening')
-            
-            if ui.keyboard_input:  # Check for keyboard input first
-                query = ui.keyboard_input
-                ui.keyboard_input = None  # Clear the keyboard input after using it
-            else:
-                query = takeCommand(ui).lower()  # Fallback to voice input
-                if query == "none":
-                    continue
-            
-            # Process the query (rest of the command handling)
-            if "go to sleep" in query:
-                ui.update_text("Alright sir, I will be available anytime")
-                speak("Alright sir, I will be available anytime")
-                awake = False
 
-            elif "hello" in query:
-                ui.update_text("Hello sir, how are you?")
-                speak("Hello sir, how are you?")
-                
-            elif "i am fine" in query:
-                ui.update_text("Good to hear, sir")
-                speak("Good to hear, sir")
-                
-            elif "how are you" in query:
-                ui.update_text("No errors and fully functional, sir")
-                speak("No errors and fully functional, sir")
-                
-            elif "thank you" in query:
-                ui.update_text("My pleasure sir")
-                speak("My pleasure sir")
+def wake_up(ui):
+    global awake
+    greetMe(speak)
+    awake = True
+    ui.update_status('listening')
 
-            elif "what is your name" in query:
-                ui.update_text("My name is Orion, sir")
-                speak("My name is Orion, sir")
+def listen_for_wake(ui):
+    """Lightweight listener used while Orion is asleep to detect wake words.
 
-            elif "what can you do" in query:
-                ui.update_text("I can do a lot of things sir. Just ask me")
-                speak("I can do a lot of things sir. Just ask me")
+    Returns True if a wake word was detected, False otherwise.
+    This uses a short timeout so it doesn't block for long when asleep.
+    """
+    r = sr.Recognizer()
+    try:
+        with sr.Microphone() as source:
+            # Short ambient calibration for sleep mode
+            r.adjust_for_ambient_noise(source, duration=0.5)
+            print("Sleep-mode: listening for wake word...")
+            ui.update_status('sleeping')
+            # Wait briefly for speech to start; once started, listen up to a few seconds
+            try:
+                audio = r.listen(source, timeout=3, phrase_time_limit=4)
+            except sr.WaitTimeoutError:
+                return False
+    except Exception as e:
+        # Microphone not available or other I/O error; don't wake
+        print(f"Sleep-mode listener error: {e}")
+        return False
 
-            elif "what time is it" in query or "what's the time" in query or "tell me the time" in query or "what is the time" in query:
-                current_time = datetime.now().strftime("%I:%M %p")
-                ui.update_text(f"The time is {current_time}")
-                speak(f"The time is {current_time}")
+    try:
+        query = r.recognize_google(audio, language='en-GB').lower()
+        print(f"[SLEEP] Heard: {query}")
+    except Exception:
+        return False
 
-            elif "what day is it" in query:
-                current_day = datetime.now().strftime("%A")
-                ui.update_text(f"Today is {current_day}")
-                speak(f"Today is {current_day}")
+    # Define wake keywords (can be extended)
+    wake_keywords = ['wake up', 'are you there', 'hey orion', 'orion']
+    return any(k in query for k in wake_keywords)
 
-            elif "what is the date" in query:
-                current_date = datetime.now().strftime("%B %d, %Y")
-                ui.update_text(f"Today is {current_date}")
-                speak(f"Today is {current_date}")
+def search_google(ui, query):
+    searchGoogle(query, ui, )
 
-            elif "what is the weather" in query:
-                webbrowser.open("https://www.bbc.co.uk/weather")
-                ui.update_text("Opening weather forecast")
-                speak("Opening weather forecast")
-                
-            elif "set volume" in query:
-                volume_level = parse_volume_level(query)
-                if volume_level is not None:
-                    set_volume(volume_level / 100)
-                    ui.update_text(f"Volume level set to {volume_level} percent")
-                    speak(f"Volume level set to {volume_level} percent")
-                    
+def search_youtube(ui, query):
+    searchYoutube(query, ui)
+
+def search_wikipedia(ui, query):
+    searchWikipedia(query, ui)
+
+
+# Each entry: (list of keywords, function)
+command_patterns = [
+    (["what time is it", "time"], time_function),
+    (["what is the date", "date"], date_function),
+    (["what is the weather", "weather"], weather_function),
+    (["set volume to", "volume"], volume_function),
+    (["set brightness to", "brightness"], brightness_function),
+    (["open"], app_opening),
+    (["close"], app_closing),
+    (["take a screenshot", "screenshot this"], screenshot_function),
+    (["open daily text", "daily text"], daily_text_function),
+    (["latest news", "show me the news"], news_function),
+    (["play music", "play song"], play_music_function),
+    (["pause music", "pause song"], pause_music_function),
+    (["skip song", "next song"], skip_song_function),
+    (["previous song", "last song"], previous_song_function),
+    (["restart song"], restart_song_function),
+    (["system stats", "system information"], system_stats_function),
+    (["flip a coin", "toss a coin", "coin toss"], flip_coin_function),
+    (["shutdown the system", "shut down"], shutdown_function),
+    (["restart the system",], restart_function),
+    (["display windows", "show windows"], display_windows),
+    (["go to sleep", "sleep now"], go_to_sleep),
+    (["wake up", "are you there"], wake_up),
+    (["search google for","search"], search_google),
+    (["search youtube for"], search_youtube),
+    (["search wikipedia for"], search_wikipedia),
+]
+
+
+def assistant_logic(ui):
+    global awake 
+    awake = True
+    speak("Activating Orion Mark 2")
+    speak("Orion is online and ready, sir.")
+    greetMe(speak)
+
+    while True:
+        if not awake:
+            # While asleep, listen briefly for wake words without blocking forever
+            try:
+                if listen_for_wake(ui):
+                    wake_up(ui)
                 else:
-                    ui.update_text("Sorry, I couldn't understand the volume level.")
-                    speak("Sorry, I couldn't understand the volume level.")
-                    
-            elif "set brightness" in query:
-                brightness_level = parse_brightness_level(query)
-                if brightness_level is not None:
-                    set_brightness(brightness_level)
-                    ui.update_text(f"Brightness level set to {brightness_level} percent")
-                    speak(f"Brightness level set to {brightness_level} percent")
-                    
+                    # Sleep a short interval before listening again to avoid tight loop
+                    time.sleep(0.5)
+            except Exception as e:
+                print(f"Error in sleep-mode listening: {e}")
+                time.sleep(1)
+            continue
+
+        query = takeCommand(ui).lower()  # Pass `ui` to `takeCommand`
+        print(f"[DEBUG] Heard: {query}")
+
+
+        matched = False
+        for keywords, function in command_patterns:
+            if any(keyword in query for keyword in keywords):
+                # Call the command with the right arguments depending on its signature
+                try:
+                    sig = inspect.signature(function)
+                    param_count = len(sig.parameters)
+                except Exception:
+                    param_count = 0
+
+                if param_count == 0:
+                    function()
+                elif param_count == 1:
+                    # Most commands expect (ui,)
+                    function(ui)
                 else:
-                    ui.update_text("Sorry, I couldn't understand the brightness level.")
-                    speak("Sorry, I couldn't understand the brightness level.")
+                    # Commands that need the query should accept (ui, query)
+                    function(ui, query)
 
-            elif "open" in query:
-                app_name = query.replace("open", "")
-                ui.update_text(f"Opening application: {app_name}")
-                open_application(app_name)
-                
-            elif "close" in query:
-                app_name = query.replace("close", "").strip()
-                close_application(app_name)
-                ui.update_text(f"Closing application: {app_name}")
-
-            elif "google" in query:
-                searchGoogle(query, ui)
-
-
-            elif "youtube" in query:
-                searchYoutube(query, ui)
-
-
-            elif "wikipedia" in query:
-                searchWikipedia(query, ui)
-
-            elif "take a screenshot" in query:
-                current_time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                screenshot = pyautogui.screenshot()
-                screenshot.save(f"screenshot_{current_time}.png")
-                speak("Screenshot taken.")
-                ui.update_text("Screenshot taken.")
-
-            elif "daily text" in query:
-                text = "https://wol.jw.org/en/wol/h/r1/lp-e"
-                webbrowser.open(text)
-                ui.update_text("Opened daily text.")
-
-            elif "latest news" in query:
-                speak("Here is the latest news sir.")
-                print(*get_news(),sep="\n")
-                ui.update_text(get_news())
-                speak(get_news())
-
-            elif "system status" in query:
-                system_stats = get_system_stats()
-                ui.update_text(system_stats)
-                speak(system_stats)
-
-            elif "play music" in query:
-                ui.update_text("Playing music on Spotify")
-                open_application("Spotify")
-                time.sleep(3)
-                pyautogui.hotkey('space')
-                pyautogui.hotkey('alt', 'tab')
-
-            elif "pause music" in query:
-                ui.update_text("Pausing music on Spotify")
-                open_application("Spotify")
-                time.sleep(2)
-                pyautogui.hotkey('space')
-                pyautogui.hotkey('alt', 'tab')
-
-            elif "skip song" in query or "next song" in query or "skip track" in query:
-                ui.update_text("Skipping song on Spotify")
-                open_application("Spotify")
-                time.sleep(2)
-                pyautogui.hotkey('ctrl', 'right')
-                pyautogui.hotkey('alt', 'tab')
-
-            elif "previous song" in query or "last song" in query:
-                ui.update_text("Playing previous song on Spotify")
-                open_application("Spotify")
-                time.sleep(2)
-                pyautogui.hotkey('ctrl', 'left')
-                time.sleep(0.5)
-                pyautogui.hotkey('ctrl', 'left')
-                pyautogui.hotkey('alt', 'tab')
-
-            elif "restart song" in query or "replay song" in query:
-                ui.update_text("Restarting song on Spotify")
-                open_application("Spotify")
-                time.sleep(2)
-                pyautogui.hotkey('ctrl', 'left')
-                pyautogui.hotkey('alt', 'tab')
-
-            elif "flip a coin" in query:
-                coinop = ["Heads", "Tails"]
-                coin = random.choice(coinop)
-                ui.update_text(coin)
-                speak("Sir, I got heads.")
-
-            elif "roll a dice" in query:
-                dice = random.randint(1, 6)
-                ui.update_text(dice)
-                speak(f"Sir, I got {dice}.")
-
-            elif "shutdown" in query or "shut down" in query:
-                speak("Shutting down in 10 seconds")
-                ui.update_text("Shutting down in 10 seconds")
-                time.sleep(10)
-                speak("Shutting down. It was a pleasure to work with you, sir.")
-                ui.update_text("Shutting down. It was a pleasure to work with you, sir.")
-                shutdown()
-                
-            elif "restart" in query:
-                speak("Restarting the system.")
-                ui.update_text("Restarting the system.")
-                restart()
-
-            elif "my windows" in query:
-                speak("Displaying the windows now, sir.")
-                ui.update_text("Displaying the windows now, sir.")
-                pyautogui.hotkey('win', 'tab')
-
-            elif "show taskbar" in query:
-                speak("Hiding the taskbar.")
-                ui.update_text("Hiding the taskbar.")
-                pyautogui.hotkey('win', 'b')
-
-            elif "show start menu" in query:
-                speak("Opening the start menu.")
-                ui.update_text("Opening the start menu.")
-                pyautogui.hotkey('win')
-
-            elif "show action center" in query or "show notifications" in query:
-                speak("Opening the action center.")
-                ui.update_text("Opening the action center.")
-                pyautogui.hotkey('win', 'a')
-
-            elif "show desktop" in query:
-                speak("Minimizing all windows to show desktop.")
-                ui.update_text("Minimizing all windows to show desktop.")
-                pyautogui.hotkey('win', 'd')
-
-            elif "add desktop" in query:
-                ui.update_text("Adding a new desktop.")
-                speak("Adding a new desktop.")
-                pyautogui.hotkey('win', 'ctrl', 'd')
-
-            elif "orion" in query or "tell me" in query:
-                say = ["One moment while I analyze that.","Sir, I'm processing your request now.","Let me think about that...","Compiling a response, Sir...", "Just a moment sir...", "Gimme a second sir..."]
-                say = random.choice(say)
-                ui.update_text(say)
-                speak(say)
-                response = ask_phi3(query, ui)
-                # print(response)
-                # ui.update_text(response)
-                # speak(response)
-
-
-            elif "remember that" in query:
-                key = query.lower().split("remember that")[-1].strip()
-                if "is" in key:
-                    k, v = key.split("is", 1)
-                    remember(k.strip(), v.strip())
-                    ui.update_text(f"Got it, sir. I'll remember that {k.strip()} is {v.strip()}.")
-                    speak(f"Got it, sir. I'll remember that {k.strip()} is {v.strip()}.")
-                else:
-                    ui.update_text("Sorry, I didn't understand that. Please use the format 'remember that [key] is [value]'.")
-                    speak("Sorry, I didn't understand that. Please use the format 'remember that [key] is [value]'.")
-
-            elif "what is" in query.lower():
-                key = query.lower().split("what is")[-1].strip()
-                response = recall(key)
-                speak(response)
-                
-            else:
-                speak("Sorry, I didn't understand that command. Could you please repeat it, sir?")
-                ui.update_text("Sorry, I didn't understand that command. Could you please repeat it?")
-                if not ui.running:
-                    break
-        else:
-            ui.update_status('idle')
-            query = takeCommand(ui).lower()
-            if "wake up" in query or "arise" in query:
-                greetMe()
-                awake = True
-                ui.update_status('listening')
-            elif detect_clap():
-                greetMe()
-                awake = True
-                ui.update_status('listening')
+                matched = True
+                break
+        if not matched:
+            continue
 
 def main():
     global root
     root = tk.Tk()
-    root.iconbitmap('logo.ico')
     ui = VoiceAssistantUI(root)
-
-    def on_closing():
-        ui.cleanup()
-        root.destroy()
-        sys.exit()
-
-    root.protocol("WM_DELETE_WINDOW", on_closing)
 
     # Set the window to full screen
     root.attributes("-fullscreen", True)

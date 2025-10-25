@@ -1,16 +1,38 @@
-import pyttsx3
 import datetime
+import edge_tts
+import pygame
+import asyncio
+import os
 
-# Initialize the text-to-speech engine
-engine = pyttsx3.init('sapi5')
-voices = engine.getProperty("voices")
-engine.setProperty("voice", voices[0].id)
-engine.setProperty("rate", 170)
+# Internal async function
+async def _speak_async(text, voice="en-GB-RyanNeural"):
+    # Generate a unique filename using timestamp
+    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    filename = f"temp_{timestamp}.mp3"
 
-def speak(audio):
-    engine.say(audio)
-    engine.runAndWait()
+    # Generate TTS audio
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save(filename)
 
+    # Initialize pygame mixer and play
+    pygame.mixer.init()
+    pygame.mixer.music.load(filename)
+    pygame.mixer.music.play()
+
+    # Wait until audio finishes
+    while pygame.mixer.music.get_busy():
+        await asyncio.sleep(0.1)
+
+    # Stop the mixer before removing file
+    pygame.mixer.music.stop()
+    pygame.mixer.quit()
+
+    # Now it’s safe to remove
+    os.remove(filename)
+
+# Synchronous wrapper
+def speak(text, voice="en-GB-RyanNeural"):
+    asyncio.run(_speak_async(text, voice))
 def greetMe():
     hour = int(datetime.datetime.now().hour)
     if hour >= 0 and hour < 12:

@@ -81,8 +81,4 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 
 ---
 
-## 🔒 License
-
----
-
 Created by **TheOscarA**
