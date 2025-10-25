@@ -10,19 +10,19 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
   Reacts to voice commands and responds with voice.
 
 - **Asleep/Wake Mode**  
-  Starts in sleep mode and activates via voice command or clap detection.
+  Starts in sleep mode and activates via wake up voice command.
 
 - **Natural Language Understanding**  
-  Capable of understanding questions and intent (future upgrade to LLama).
+  Capable of understanding questions and intent (future upgrade to deepseek-r1).
 
 - **System Monitoring**  
   Displays CPU, RAM, and battery status.
 
 - **Google, YouTube, and Wikipedia Search Integration**  
-  Results shown directly in UI and in the browser.
+  Results shown directly in the browser.
 
 - **UI Circle Feedback**  
-  Color-coded for listening and processing states.
+  Color-coded for listening (blue) and uderstanding (red) states.
 
 - **Full-screen UI**  
   Designed for immersive, sleek operation.
@@ -32,8 +32,8 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 
 ## 🧠 Planned Features
 
-- **Local AI Model (LLama 4 Scout)**  
-  For privacy-focused and offline use.
+- **Local AI Model (Deepseek-r1)**  
+  For natural conversation and improved scalability because I want to add function calling.
 
 - **Enhanced NLP**  
   Improved understanding through intent recognition.
@@ -49,9 +49,8 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 ## 🛠️ Tech Stack
 
 - **Language**: Python 3  
-- **Voice Engine**: `pyttsx3`  
+- **Voice Engine**: `edge_tts`  
 - **UI Framework**: `Tkinter`  
-- **Web Integration**: `requests`,
 - **Voice Recognition**: Using Google Speech Recognition via `speech_recognition` library
 - **Packaging**: PyInstaller (one-file executable)
 
@@ -60,16 +59,19 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 ## 💻 Running Orion
 
 1. Clone the repository  
-2. Install requirements: `pip install -r requirements.txt`  
-3. Run: `python main.py`
+2. Get a api-key from [newsapi.org](https://newsapi.org/)
+3. Add api-key in `Get_News.py`
+4. Install requirements: `pip install -r requirements.txt`  
+5. Run: `python main.py`
 
 ---
 
 ## 🚀 Future Integrations
 
-- **Llama 4 Scout via llama.cpp**
-- **Code generation support**
-- **Advanced contextual memory module**
+- Deepseek-r1 via Ollama
+- Function calling
+- Code generation support
+- Advanced contextual memory module
 
 ---
 
