@@ -13,7 +13,7 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
   Starts in sleep mode and activates via wake up voice command.
 
 - **Natural Language Understanding**  
-  Capable of understanding questions and intent (future upgrade to deepseek-r1).
+  Capable of understanding questions and intent (future upgrade to Phi3).
 
 - **System Monitoring**  
   Displays CPU, RAM, and battery status.
@@ -32,7 +32,7 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 
 ## 🧠 Planned Features
 
-- **Local AI Model (Deepseek-r1)**  
+- **Local AI Model (Phi3)**  
   For natural conversation and improved scalability because I want to add function calling.
 
 - **Enhanced NLP**  
@@ -68,7 +68,7 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 
 ## 🚀 Future Integrations
 
-- Deepseek-r1 via Ollama
+- Phi3 via Ollama
 - Function calling
 - Code generation support
 - Advanced contextual memory module

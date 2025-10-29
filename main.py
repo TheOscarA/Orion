@@ -22,6 +22,8 @@ import edge_tts
 import pygame
 import os
 from datetime import datetime
+import subprocess
+import json
 
 # Internal async function
 async def _speak_async(text, voice="en-GB-RyanNeural"):
@@ -508,6 +510,44 @@ def search_youtube(ui, query):
 def search_wikipedia(ui, query):
     searchWikipedia(query, ui)
 
+def get_phi3_response(prompt: str, model: str = "O.R.I.O.N") -> str:
+    """
+    Sends a prompt to O.R.I.O.N model via Ollama and returns plain text output.
+    """
+    try:
+        result = subprocess.run(
+            ["ollama", "run", model, prompt],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=60
+        )
+
+        if result.returncode != 0:
+            return f"[O.R.I.O.N error: {result.stderr.strip()}]"
+
+        return result.stdout.strip() or "[O.R.I.O.N gave no response.]"
+
+    except Exception as e:
+        return f"[Error communicating with O.R.I.O.N: {e}]"
+
+def orion_ai_function(ui, query: str):
+    # Remove the keyword 'orion' from the query
+    # signature changed to accept (ui, query) so dispatcher passes both
+    clean_query = query.lower().replace("orion", "").strip()
+    if not clean_query:
+        clean_query = "Hello, how can I help you?"
+
+    response = get_phi3_response(clean_query)
+
+    # Speak or print it in your UI
+    try:
+        speak(response)
+    except Exception:
+        print("[O.R.I.O.N]:", response)
+
+
 
 # Each entry: (list of keywords, function)
 command_patterns = [
@@ -536,6 +576,7 @@ command_patterns = [
     (["search google for","search"], search_google),
     (["search youtube for"], search_youtube),
     (["search wikipedia for"], search_wikipedia),
+    (["orion", "ryan"], orion_ai_function),
 ]
 
 
@@ -544,7 +585,7 @@ def assistant_logic(ui):
     awake = True
     speak("Activating Orion Mark 2")
     speak("Orion is online and ready, sir.")
-    greetMe(speak)
+    greetMe()
 
     while True:
         if not awake:
