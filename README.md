@@ -10,7 +10,7 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
   Reacts to voice commands and responds with voice.
 
 - **Asleep/Wake Mode**  
-  Starts in sleep mode and activates via wake up voice command.
+  Starts in awake mode and can be deacticated via `go to sleep` voice command.
 
 - **Natural Language Understanding**  
   Capable of understanding questions and intent (future upgrade to Phi3).
@@ -63,6 +63,7 @@ Welcome to **Orion** – Inspired by J.A.R.V.I.S.
 3. Add api-key in `Get_News.py`
 4. Install requirements: `pip install -r requirements.txt`  
 5. Run: `python main.py`
+6. Start speaking
 
 ---
 
