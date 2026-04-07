@@ -1,39 +1,44 @@
 import datetime
-import edge_tts
-import pygame
-import asyncio
-import os
 
-# Internal async function
-async def _speak_async(text, voice="en-GB-RyanNeural"):
-    # Generate a unique filename using timestamp
-    timestamp = datetime.now().strftime("%Y%m%d%H%M%S%f")
-    filename = f"temp_{timestamp}.mp3"
 
-    # Generate TTS audio
-    communicate = edge_tts.Communicate(text, voice)
-    await communicate.save(filename)
+def _make_local_speak():
+    """Create a temporary pyttsx3 engine and return a speak function that uses it.
 
-    # Initialize pygame mixer and play
-    pygame.mixer.init()
-    pygame.mixer.music.load(filename)
-    pygame.mixer.music.play()
+    We create a local engine only when no external speak function is provided so
+    the main program can reuse its own engine and avoid conflicts.
+    """
+    try:
+        import pyttsx3
+    except Exception:
+        # If pyttsx3 is unavailable, fall back to a no-op speak to avoid crashes
+        def _noop(msg):
+            print(f"TTS unavailable: {msg}")
 
-    # Wait until audio finishes
-    while pygame.mixer.music.get_busy():
-        await asyncio.sleep(0.1)
+        return _noop
 
-    # Stop the mixer before removing file
-    pygame.mixer.music.stop()
-    pygame.mixer.quit()
+    engine = pyttsx3.init('sapi5')
+    voices = engine.getProperty("voices")
+    if voices:
+        engine.setProperty("voice", voices[0].id)
+    engine.setProperty("rate", 170)
 
-    # Now it’s safe to remove
-    os.remove(filename)
+    def _local_speak(audio):
+        engine.say(audio)
+        engine.runAndWait()
 
-# Synchronous wrapper
-def speak(text, voice="en-GB-RyanNeural"):
-    asyncio.run(_speak_async(text, voice))
-def greetMe():
+    return _local_speak
+
+
+def greetMe(speak_fn=None):
+    """Greet based on the current time.
+
+    If speak_fn is provided, use it for TTS; otherwise create a temporary engine.
+    """
+    if speak_fn is None:
+        speak = _make_local_speak()
+    else:
+        speak = speak_fn
+
     hour = int(datetime.datetime.now().hour)
     if hour >= 0 and hour < 12:
         speak("Good morning sir")
@@ -43,7 +48,7 @@ def greetMe():
         speak("Good evening sir")
     else:
         speak("Good night sir")
-    
+
     current_time = datetime.datetime.now()
     hour = current_time.hour
     minute = current_time.minute

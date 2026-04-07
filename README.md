@@ -1,87 +1,66 @@
-# Orion AI Assistant - README
+# Orion MK1 — Local Voice Assistant
 
-Welcome to **Orion** – Inspired by J.A.R.V.I.S.
+This repository contains Orion MK1, a local voice assistant built with Python.
 
----
+It uses:
+- edge_tts for very natural sounding voices
+- SpeechRecognition for microphone input (Google Web Speech API by default)
+- pywhatkit, wikipedia, pyautogui, psutil and other helper libraries
 
-## 🔧 Features
+This README covers quick setup, running, and common troubleshooting steps (especially TTS issues on Windows).
 
-- **Voice-Activated Interface**  
-  Reacts to voice commands and responds with voice.
+## Quick start
 
-- **Asleep/Wake Mode**  
-  Starts in awake mode and can be deacticated via `go to sleep` voice command.
+1. Create and activate a Python virtual environment (recommended):
 
-- **Natural Language Understanding**  
-  Capable of understanding questions and intent (future upgrade to Phi3).
+```powershell
+python -m venv .venv-1
+& .\.venv-1\Scripts\Activate.ps1
+```
 
-- **System Monitoring**  
-  Displays CPU, RAM, and battery status.
+2. Install dependencies:
 
-- **Google, YouTube, and Wikipedia Search Integration**  
-  Results shown directly in the browser.
+```powershell
+pip install -r requirements.txt
+```
 
-- **UI Circle Feedback**  
-  Color-coded for listening (blue) and uderstanding (red) states.
+3. Run Orion:
 
-- **Full-screen UI**  
-  Designed for immersive, sleek operation.
-  Press "esc" or "del" to toggle full-screen
+```powershell
+& .venv-1\Scripts\python.exe .\main.py
+```
 
----
+On first run the GUI will open. Orion will announce startup greetings and then listen for commands.
 
-## 🧠 Planned Features
+## Basic usage
+- Speak a command when Orion is in the listening state.
+- Wake/sleep commands:
+  - "go to sleep" or "sleep now" — Orion sleeps but listens for wake words.
+  - "wake up", "are you there", "hey orion", or simply "orion" — wake words supported while asleep.
 
-- **Local AI Model (Phi3)**  
-  For natural conversation and improved scalability because I want to add function calling.
+## File overview
+- `main.py` — main program, UI, command dispatcher, and TTS engine initialization.
+- `GreetMe.py` — greeting helper (now reuses main speak function when called with `greetMe(speak)`).
+- `SearchNow.py` — web search helpers (now accept a `speak` callable from `main.py`).
+- `requirements.txt` — Python package dependencies.
 
-- **Enhanced NLP**  
-  Improved understanding through intent recognition.
+## Common issues & troubleshooting
 
-- **Vosk Model**
-  For Offline voice recognition.
 
-- **Contextual Memory**  
-  Orion will grow and adapt over time.
+1. Microphone or recognizer errors
 
----
+	- Make sure your default microphone is enabled and accessible to Python.
+	- If `speech_recognition` raises `WaitTimeoutError`, the app waits for a speech start for up to 5 seconds (configurable in `takeCommand`). Increase `timeout` if needed.
 
-## 🛠️ Tech Stack
+2. Offline wake-word detection
 
-- **Language**: Python 3  
-- **Voice Engine**: `edge_tts`  
-- **UI Framework**: `Tkinter`  
-- **Voice Recognition**: Using Google Speech Recognition via `speech_recognition` library
-- **Packaging**: PyInstaller (one-file executable)
+	- The current implementation uses Google speech recognition for wake detection. For offline, lower-latency wake-word detection, consider PocketSphinx or a dedicated wakeword engine.
 
----
+## Development notes
 
-## 💻 Running Orion
+- Command dispatcher: The app inspects function signatures to call command functions with the correct `(ui)` or `(ui, query)` arguments.
+- If you add new modules that speak, make them accept a `speak` callable rather than creating their own pyttsx3 engine.
 
-1. Clone the repository  
-2. Get a api-key from [newsapi.org](https://newsapi.org/)
-3. Add api-key in `Get_News.py`
-4. Install requirements: `pip install -r requirements.txt`  
-5. Run: `python main.py`
-6. Start speaking
 
----
+Created by TheOscarA
 
-## 🚀 Future Integrations
-
-- Phi3 via Ollama
-- Function calling
-- Code generation support
-- Advanced contextual memory module
-
----
-
-## 🧠 Reminder
-
-- Orion is still under development.
-- Made in my spare time, so there are still lots of bugs.
-- Only works on Windows
-
----
-
-Created by **TheOscarA**

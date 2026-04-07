@@ -1,13 +1,40 @@
-edge_tts
+# ORION MK2 — Python dependencies
+# Install everything with: pip install -r requirements.txt
+
+# Voice & TTS
+edge-tts
 SpeechRecognition
-sounddevice 
-numpy 
-pyautogui 
-ollama
-psutil 
-pywhatkit
-pycaw
-screen-brightness-control
-Appopener
 pyaudio
+
+# AI
+ollama
+
+# UI & window
+pywebview
+
+# System control
+pyautogui
+psutil
+screen-brightness-control
+pycaw
+
+# App control
+AppOpener
+
+# Google APIs (Calendar + Tasks)
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+
+# Date parsing (for calendar natural language)
+dateparser
+
+# Audio playback (TTS output)
 pygame
+
+# HTTP (weather, currency)
+requests
+
+# Web search
+ddgs
