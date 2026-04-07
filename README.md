@@ -1,66 +1,86 @@
 # Orion MK1 — Local Voice Assistant
 
-This repository contains Orion MK1, a local voice assistant built with Python.
+Orion MK1 is a Python-based local voice assistant for Windows. It combines speech recognition, text-to-speech, and desktop automation to run spoken commands and respond through a simple GUI.
 
-It uses:
-- edge_tts for very natural sounding voices
-- SpeechRecognition for microphone input (Google Web Speech API by default)
-- pywhatkit, wikipedia, pyautogui, psutil and other helper libraries
+## Features
 
-This README covers quick setup, running, and common troubleshooting steps (especially TTS issues on Windows).
+- Local voice assistant with microphone input
+- Natural voice output using `edge_tts`
+- Speech recognition via `SpeechRecognition` (Google Web Speech API by default)
+- Built-in commands for search, media control, timers, notes, and system actions
+- Modular command handlers for easier extension
 
-## Quick start
+## Requirements
 
-1. Create and activate a Python virtual environment (recommended):
+- Python 3.13 only — `pygame` and other libraries is not supported on Python 3.14
+- Windows 10 / 11
+- A working microphone and internet connection for default speech recognition
+
+## Setup
+
+1. Create and activate a virtual environment:
 
 ```powershell
 python -m venv .venv-1
 & .\.venv-1\Scripts\Activate.ps1
 ```
 
-2. Install dependencies:
+2. Install the project dependencies:
 
 ```powershell
 pip install -r requirements.txt
 ```
 
-3. Run Orion:
+3. Start Orion:
 
 ```powershell
 & .venv-1\Scripts\python.exe .\main.py
 ```
 
-On first run the GUI will open. Orion will announce startup greetings and then listen for commands.
+## How to use
 
-## Basic usage
-- Speak a command when Orion is in the listening state.
-- Wake/sleep commands:
-  - "go to sleep" or "sleep now" — Orion sleeps but listens for wake words.
-  - "wake up", "are you there", "hey orion", or simply "orion" — wake words supported while asleep.
+- Speak a command when Orion is listening.
+- Orion will announce that it is ready, then process your query.
+- Use wake and sleep phrases to control the assistant state.
 
-## File overview
-- `main.py` — main program, UI, command dispatcher, and TTS engine initialization.
-- `GreetMe.py` — greeting helper (now reuses main speak function when called with `greetMe(speak)`).
-- `SearchNow.py` — web search helpers (now accept a `speak` callable from `main.py`).
-- `requirements.txt` — Python package dependencies.
+### Wake / sleep commands
 
-## Common issues & troubleshooting
+- Sleep: `go to sleep`, `sleep now`
+- Wake: `wake up`, `are you there`, `hey orion`, `orion`
 
+## Project layout
 
-1. Microphone or recognizer errors
+- `main.py` — main application entry point, UI, speech engine, and command dispatcher
+- `GreetMe.py` — greeting and startup voice helper
+- `SearchNow.py` — web search helper utilities
+- `requirements.txt` — Python dependencies
+- `orion_ui.html` — optional UI markup for the assistant interface
 
-	- Make sure your default microphone is enabled and accessible to Python.
-	- If `speech_recognition` raises `WaitTimeoutError`, the app waits for a speech start for up to 5 seconds (configurable in `takeCommand`). Increase `timeout` if needed.
+## Troubleshooting
 
-2. Offline wake-word detection
+### Microphone issues
 
-	- The current implementation uses Google speech recognition for wake detection. For offline, lower-latency wake-word detection, consider PocketSphinx or a dedicated wakeword engine.
+- Ensure your microphone is enabled and accessible to Python.
+- If `speech_recognition` raises `WaitTimeoutError`, the app is waiting for speech and may need a longer timeout.
+- Try running the script from the same shell where the virtual environment is activated.
+
+### Text-to-speech issues on Windows
+
+- `edge_tts` depends on the Microsoft Edge runtime.
+- If speech audio does not play, verify Edge is installed and your default audio device is working.
+
+### Wake-word detection
+
+- Orion uses Google speech recognition for wake words by default.
+- For offline wake-word support, consider integrating PocketSphinx or another dedicated offline wake-word engine.
 
 ## Development notes
 
-- Command dispatcher: The app inspects function signatures to call command functions with the correct `(ui)` or `(ui, query)` arguments.
-- If you add new modules that speak, make them accept a `speak` callable rather than creating their own pyttsx3 engine.
+- Command modules should accept a shared `speak` callable instead of creating their own TTS engine.
+- The dispatcher inspects function signatures to call commands with the correct parameters.
+- Add new command modules by following the existing structure in `main.py` and supporting files.
 
+---
 
 Created by TheOscarA
 
