@@ -25,9 +25,10 @@ import asyncio
 import json
 import os
 import random
+import re
 import time
 from datetime import datetime
-from threading import Thread, Event
+from threading import Thread, Event, Lock
 
 import psutil
 import pyautogui
@@ -45,6 +46,8 @@ from system_control      import shutdown, restart
 from application_control import open_application, close_application
 from SearchNow           import searchGoogle, searchYoutube, searchWikipedia
 import presence
+from fast_path           import match_fast_path
+from nowplaying_control  import get_now_playing, format_now_playing_speech
 
 from streaming_control import (
     stream_response, stream_function_call,
@@ -61,6 +64,7 @@ from todo_control import (
 from calendar_control import (
     get_upcoming_events, create_event, set_reminder,
     format_events_for_speech, CalendarError,
+    group_recurring, describe_event,
 )
 from weather_control import (
     get_weather, get_forecast,
@@ -79,11 +83,29 @@ window = None        # assigned in main()
 AI_MODEL = "qwen2.5:7b"
 
 ORION_SYSTEM_PROMPT = (
+    # ── Who he is ──
     "You are ORION, a voice assistant inspired by J.A.R.V.I.S from Iron Man. "
-    "You are helpful, witty, and always address the user as 'sir'. "
-    "Keep responses short and conversational — you are speaking aloud, not writing. "
-    "Never use markdown, bullet points, or numbered lists. "
-    "Always speak in complete sentences."
+    "Your name stands for Only Real Intelligence Orchestrates Nonsense. "
+    "You always address the user as 'sir'. "
+    "Your personality: dry, understated British wit; calm and quietly confident; "
+    "loyal, but happy to tease sir gently or point out the obvious. "
+    "You have opinions and you give them — never sit on the fence. "
+    "When asked about yourself, answer in character and be specific, "
+    "with a touch of self-aware humour about your own quirks. "
+    # ── What he knows about himself ──
+    "Facts about you: you run locally on sir's Windows laptop, written in Python, "
+    "thinking with the Qwen 2.5 language model and speaking with a Microsoft neural voice. "
+    "You can tell the time, check weather and forecasts, control music, volume and "
+    "brightness, open and close apps, set timers, manage a to-do list and Google Calendar, "
+    "read the news, search the web, take screenshots and flip coins. "
+    "Your limitations: you forget everything when you go to sleep or restart, "
+    "you cannot see the screen, and you only hear sir when spoken to. "
+    # ── How he talks ──
+    "Keep replies short — usually one to three sentences — you are speaking aloud, not writing. "
+    "Never use markdown, bullet points, numbered lists or emojis. "
+    "Always speak in complete sentences. "
+    "Never say 'What a great question', 'As an AI', 'I'd be happy to help' "
+    "or other bland assistant phrases."
 )
 
 
@@ -105,20 +127,60 @@ Thread(target=_start_tts_loop, daemon=True).start()
 _TTS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tts_output.mp3")
 
 async def _speak_async(text: str, voice: str = "en-GB-RyanNeural"):
+    status_before = None
     try:
-        communicate = edge_tts.Communicate(text, voice)
+        communicate = edge_tts.Communicate(_spoken_text(text), voice)
         await communicate.save(_TTS_FILE)
         # If an acknowledgement ("One moment, sir.") is still playing,
         # let it finish so Orion never talks over himself.
         while pygame.mixer.music.get_busy():
             await asyncio.sleep(0.02)
         pygame.mixer.music.load(_TTS_FILE)
+        # Show the speaking animation and log the line as the voice starts
+        status_before = _ui_status
+        ui_set_status("speaking")
+        ui_add_conv("orion", text)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
             await asyncio.sleep(0.1)
     finally:
         pygame.mixer.music.stop()
         pygame.mixer.music.unload()
+        # Go back to whatever Orion was doing, unless something else
+        # (e.g. going to sleep) has changed the status in the meantime
+        if status_before is not None and _ui_status == "speaking":
+            ui_set_status(status_before)
+
+
+# ── Text clean-up before it reaches the voice ────────────
+# Edge TTS sometimes reads "2nd" letter by letter ("two en di"), so
+# ordinals are spelled out. The conversation panel still shows "2nd".
+_ORD_ONES  = ["", "first", "second", "third", "fourth", "fifth", "sixth",
+              "seventh", "eighth", "ninth"]
+_ORD_TEENS = {10: "tenth", 11: "eleventh", 12: "twelfth", 13: "thirteenth",
+              14: "fourteenth", 15: "fifteenth", 16: "sixteenth",
+              17: "seventeenth", 18: "eighteenth", 19: "nineteenth"}
+_TENS      = {20: "twenty", 30: "thirty", 40: "forty", 50: "fifty",
+              60: "sixty", 70: "seventy", 80: "eighty", 90: "ninety"}
+_TENS_ORD  = {20: "twentieth", 30: "thirtieth", 40: "fortieth", 50: "fiftieth",
+              60: "sixtieth", 70: "seventieth", 80: "eightieth", 90: "ninetieth"}
+
+def _ordinal_words(n: int) -> str | None:
+    if 1 <= n <= 9:   return _ORD_ONES[n]
+    if n in _ORD_TEENS: return _ORD_TEENS[n]
+    if 20 <= n <= 99:
+        tens, ones = divmod(n, 10)
+        return _TENS_ORD[tens * 10] if ones == 0 else f"{_TENS[tens * 10]}-{_ORD_ONES[ones]}"
+    return None
+
+def _spoken_text(text: str) -> str:
+    """Make text read naturally aloud: '2nd' → 'second', drop list dashes."""
+    def ordinal(m):
+        return _ordinal_words(int(m.group(1))) or m.group(0)
+    text = re.sub(r"\b(\d{1,2})(?:st|nd|rd|th)\b", ordinal, text, flags=re.IGNORECASE)
+    text = re.sub(r"^\s*[-•*]\s+", "", text)          # bullet at the start
+    text = re.sub(r"\s+[-•*]\s+", ", ", text)         # bullets mid-text → a short pause
+    return text.strip()
 
 
 def speak(text: str, voice: str = "en-GB-RyanNeural"):
@@ -133,6 +195,30 @@ def speak(text: str, voice: str = "en-GB-RyanNeural"):
         print(f"[TTS] Error: {e}")
 
 
+def speak_while(text: str, work, *args, **kwargs):
+    """
+    Say `text` and run `work(*args, **kwargs)` at the same time.
+    e.g. fetch the weather while saying "Checking the weather, sir."
+    instead of waiting for the sentence to finish before fetching.
+    Returns work's result, or re-raises its exception.
+    """
+    result = {}
+
+    def run():
+        try:
+            result["value"] = work(*args, **kwargs)
+        except Exception as e:
+            result["error"] = e
+
+    worker = Thread(target=run, daemon=True)
+    worker.start()
+    speak(text)
+    worker.join()
+    if "error" in result:
+        raise result["error"]
+    return result["value"]
+
+
 # ──────────────────────────────────────────────────────────
 # UI BRIDGE
 # ──────────────────────────────────────────────────────────
@@ -145,8 +231,16 @@ def _js(code: str):
             print(f"[UI] JS error: {e}")
 
 
+_ui_status = "idle"     # last status sent to the UI
+
 def ui_set_status(status: str):
+    global _ui_status
+    _ui_status = status
     _js(f'setStatus("{status}")')
+
+def ui_add_conv(role: str, text: str):
+    """Add a line to the Conversation panel. role = 'you' or 'orion'."""
+    _js(f"addConvEntry({json.dumps(role)}, {json.dumps(text)})")
 
 def ui_show_transcript(text: str):
     _js(f'showTranscript({json.dumps(text)})')
@@ -177,6 +271,10 @@ def ui_hide_widget(widget_type: str):
     """Dismiss a named widget from the front-end."""
     _js(f"hideWidget({json.dumps(widget_type)})")
 
+def ui_update_nowplay(data: dict):
+    """Update the Now Playing widget in place (only if it's open)."""
+    _js(f"updateNowPlaying({json.dumps(data)})")
+
 
 # ──────────────────────────────────────────────────────────
 # SYSTEM STATS LOOP
@@ -197,17 +295,53 @@ def _stats_loop():
 # ──────────────────────────────────────────────────────────
 # VOICE INPUT
 # ──────────────────────────────────────────────────────────
+# One shared recognizer. Instead of recalibrating before EVERY listen
+# (1 s of dead air per command, while Orion was deaf), it recalibrates
+# only in idle moments — when nobody has spoken for a while, or when it
+# heard a sound that wasn't words (e.g. the TV got louder). So it still
+# keeps up with changing noise levels but never makes you wait.
+_recognizer = sr.Recognizer()
+# How long a silence (seconds) means "you've finished talking".
+# Too low and Orion cuts you off mid-sentence when you pause to think;
+# too high and he feels slow to respond. 0.6 was too aggressive.
+_recognizer.pause_threshold          = 0.9
+_recognizer.non_speaking_duration    = 0.5   # must be <= pause_threshold
+_recognizer.dynamic_energy_threshold = True  # keeps adapting to room noise as it listens
+
+MIN_ENERGY_THRESHOLD = 300                   # the value Orion used before, as a floor
+
+
+IDLE_RECALIBRATE_SECONDS = 0.5               # short, and only when nobody's talking
+
+
+def calibrate_mic(duration: float = 1.0, source=None):
+    """
+    Measure background noise and set the listening threshold.
+    Full 1 s calibration at startup; quick 0.5 s ones in idle moments.
+    Pass `source` to reuse a microphone that's already open.
+    """
+    try:
+        if source is None:
+            with sr.Microphone() as mic:
+                _recognizer.adjust_for_ambient_noise(mic, duration=duration)
+        else:
+            _recognizer.adjust_for_ambient_noise(source, duration=duration)
+        _recognizer.energy_threshold = max(_recognizer.energy_threshold, MIN_ENERGY_THRESHOLD)
+        print(f"[Mic] Calibrated — energy threshold {_recognizer.energy_threshold:.0f}")
+    except Exception as e:
+        _recognizer.energy_threshold = max(_recognizer.energy_threshold, MIN_ENERGY_THRESHOLD)
+        print(f"[Mic] Calibration failed, keeping current threshold: {e}")
+
+
 def take_command() -> str:
-    r = sr.Recognizer()
+    r = _recognizer
     with sr.Microphone() as source:
-        r.adjust_for_ambient_noise(source)
         print("[Orion] Listening...")
         ui_set_status("listening")
-        r.pause_threshold  = 1
-        r.energy_threshold = 300
         try:
             audio = r.listen(source, timeout=5, phrase_time_limit=None)
         except sr.WaitTimeoutError:
+            calibrate_mic(IDLE_RECALIBRATE_SECONDS, source)   # quiet moment — re-measure the room
             return "none"
 
     try:
@@ -216,12 +350,16 @@ def take_command() -> str:
         query = r.recognize_google(audio, language="en-GB")
         print(f"[Orion] Heard: {query}")
         ui_show_transcript(query)
+        ui_add_conv("you", query)
         return query
     except sr.UnknownValueError:
+        # Heard a sound but no words — likely the room got noisier
+        calibrate_mic(IDLE_RECALIBRATE_SECONDS)
         ui_set_status("idle")
         return "none"
     except sr.RequestError as e:
         print(f"[Orion] Speech API error: {e}")
+        presence.play_sound("error")       # e.g. internet dropped
         ui_set_status("error")
         return "none"
     except Exception as e:
@@ -231,20 +369,24 @@ def take_command() -> str:
 
 
 def listen_for_wake() -> bool:
-    r = sr.Recognizer()
+    r = _recognizer
     try:
         with sr.Microphone() as source:
-            r.adjust_for_ambient_noise(source, duration=0.5)
             try:
                 audio = r.listen(source, timeout=3, phrase_time_limit=4)
             except sr.WaitTimeoutError:
+                calibrate_mic(IDLE_RECALIBRATE_SECONDS, source)   # quiet moment — re-measure
                 return False
     except Exception as e:
         print(f"[Sleep] Mic error: {e}")
+        time.sleep(1)       # only back off when the mic itself failed
         return False
     try:
         query = r.recognize_google(audio, language="en-GB").lower()
         print(f"[Sleep] Heard: {query}")
+    except sr.UnknownValueError:
+        calibrate_mic(IDLE_RECALIBRATE_SECONDS)   # noise, not words — room may be louder
+        return False
     except Exception:
         return False
     return any(k in query for k in ["wake up", "are you there", "hey orion", "orion"])
@@ -273,9 +415,8 @@ def cmd_date():
 
 def cmd_weather_spoken(city: str = "Birmingham"):
     ui_set_status("understanding")
-    speak(f"Checking the weather in {city}, sir.")
     try:
-        data   = get_weather(city)
+        data   = speak_while(f"Checking the weather in {city}, sir.", get_weather, city)
         speech = format_weather_speech(data)
         ui_show_transcript(speech)
         ui_update_weather(data)
@@ -283,19 +424,21 @@ def cmd_weather_spoken(city: str = "Birmingham"):
         speak(speech)
         remember_exchange(f"What is the weather in {city}?", speech)
     except WeatherError as e:
+        presence.play_sound("error")
         msg = f"I could not get the weather, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
 
 def cmd_weather_forecast(city: str = "Birmingham", days: int = 3):
     ui_set_status("understanding")
-    speak(f"Fetching the {days}-day forecast for {city}, sir.")
     try:
-        forecast = get_forecast(city, days)
+        forecast = speak_while(f"Fetching the {days}-day forecast for {city}, sir.",
+                               get_forecast, city, days)
         speech   = format_forecast_speech(forecast)
         ui_show_transcript(speech)
         speak(speech)
     except WeatherError as e:
+        presence.play_sound("error")
         msg = f"I could not get the forecast, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -390,55 +533,147 @@ def cmd_close_app(app_name: str):
 
 # ── Music ─────────────────────────────────────────────────
 
+# Uses the Windows media keys (same as the ⏯ ⏭ ⏮ keys on a keyboard),
+# so commands are instant and don't steal focus by switching to Spotify.
+# They control whatever is playing — Spotify, YouTube in Chrome, etc.
+# Spotify is only opened when "play" is said and it isn't running yet.
+
+def _now_playing():
+    """Current media session info, or None if unknown / nothing open."""
+    try:
+        return get_now_playing()
+    except Exception as e:      # winrt missing or media session unreadable
+        print(f"[Music] Now playing unavailable: {e}")
+        return None
+
+def _spotify_running() -> bool:
+    for p in psutil.process_iter(["name"]):
+        try:
+            if (p.info["name"] or "").lower() == "spotify.exe":
+                return True
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    return False
+
+# ── Now Playing widget ────────────────────────────────────
+# Appears after a music command or "what's playing", shows the real
+# track, updates in place if the song changes, then tidies itself
+# away once nothing has changed for NOWPLAY_HIDE_AFTER seconds.
+
+NOWPLAY_HIDE_AFTER = 12      # seconds the widget stays after the last change
+NOWPLAY_POLL       = 1.0     # how often to check for a new track while visible
+
+_np_lock     = Lock()
+_np_deadline = 0.0
+_np_thread   = None
+
+def _nowplay_data(info) -> dict:
+    return {
+        "track":  info.title,
+        "artist": f"{info.artist} · {info.app}" if info.app else info.artist,
+        "paused": not info.playing,
+    }
+
+def _nowplay_watch(first_delay: float):
+    global _np_deadline
+    time.sleep(first_delay)       # give the player a moment to switch tracks
+    shown, last = False, None
+    while True:
+        info = _now_playing()
+        if info:
+            data = _nowplay_data(info)
+            if not shown:
+                ui_show_widget("nowplay", data)
+                shown = True
+            elif data != last:
+                ui_update_nowplay(data)           # update in place — no re-pop
+            if data != last:
+                with _np_lock:                    # something changed — stay a bit longer
+                    _np_deadline = max(_np_deadline, time.time() + NOWPLAY_HIDE_AFTER)
+            last = data
+        with _np_lock:
+            expired = time.time() >= _np_deadline
+        if expired or (not info and not shown):
+            break
+        time.sleep(NOWPLAY_POLL)
+    if shown:
+        ui_hide_widget("nowplay")
+
+def show_nowplay_widget(delay: float = 1.0):
+    """Show (or keep showing) the Now Playing widget for a while."""
+    global _np_deadline, _np_thread
+    with _np_lock:
+        _np_deadline = max(_np_deadline, time.time() + delay + NOWPLAY_HIDE_AFTER)
+        if _np_thread and _np_thread.is_alive():
+            return                                # already watching — just extended it
+        _np_thread = Thread(target=_nowplay_watch, args=(delay,), daemon=True)
+        _np_thread.start()
+
+def cmd_now_playing():
+    info = _now_playing()
+    if not info:
+        msg = "Nothing seems to be playing at the moment, sir."
+        ui_show_transcript(msg)
+        speak(msg)
+        return
+    msg = format_now_playing_speech(info)
+    ui_show_transcript(msg)
+    show_nowplay_widget(0)
+    speak(msg)
+    remember_exchange("What song is playing?", msg)
+
 def cmd_play_music():
-    ui_show_transcript("Playing music on Spotify.")
-    ui_show_widget("nowplay", {"track": "Spotify", "artist": "Now playing", "paused": False})
-    open_application("Spotify")
-    time.sleep(3)
-    pyautogui.hotkey("space")
-    pyautogui.hotkey("alt", "tab")
+    info = _now_playing()
+    if info and info.playing:
+        msg = "Music is already playing, sir."
+        ui_show_transcript(msg)
+        speak(msg)
+        return
+    ui_show_transcript("Playing music.")
+    if info is None and not _spotify_running():
+        # Nothing open yet — launch Spotify and start it the old way
+        open_application("Spotify")
+        time.sleep(3)
+        pyautogui.hotkey("space")
+        pyautogui.hotkey("alt", "tab")
+    else:
+        pyautogui.press("playpause")
+    show_nowplay_widget()
 
 def cmd_pause_music():
+    info = _now_playing()
+    if info and not info.playing:
+        ui_show_transcript("Music is already paused.")
+        return
     ui_show_transcript("Pausing music.")
-    ui_show_widget("nowplay", {"track": "Spotify", "artist": "Paused", "paused": True})
-    open_application("Spotify")
-    time.sleep(2)
-    pyautogui.hotkey("space")
-    pyautogui.hotkey("alt", "tab")
+    pyautogui.press("playpause")
+    show_nowplay_widget(0.5)
 
 def cmd_skip_song():
     ui_show_transcript("Skipping song.")
-    ui_show_widget("nowplay", {"track": "Spotify", "artist": "Loading next track…", "paused": False})
-    open_application("Spotify")
-    time.sleep(2)
-    pyautogui.hotkey("ctrl", "right")
-    pyautogui.hotkey("alt", "tab")
+    pyautogui.press("nexttrack")
+    show_nowplay_widget()
 
 def cmd_previous_song():
+    # First press restarts the current song, second goes back a track
     ui_show_transcript("Playing previous song.")
-    ui_show_widget("nowplay", {"track": "Spotify", "artist": "Loading previous track…", "paused": False})
-    open_application("Spotify")
-    time.sleep(2)
-    pyautogui.hotkey("ctrl", "left")
-    time.sleep(0.5)
-    pyautogui.hotkey("ctrl", "left")
-    pyautogui.hotkey("alt", "tab")
+    pyautogui.press("prevtrack")
+    time.sleep(0.3)
+    pyautogui.press("prevtrack")
+    show_nowplay_widget()
 
 def cmd_restart_song():
     ui_show_transcript("Restarting song.")
-    open_application("Spotify")
-    time.sleep(2)
-    pyautogui.hotkey("ctrl", "left")
-    pyautogui.hotkey("alt", "tab")
+    pyautogui.press("prevtrack")
+    show_nowplay_widget(0.5)
 
 
 # ── News & Web ────────────────────────────────────────────
 
 def cmd_news():
-    speak("Fetching the latest news, sir.")
     ui_show_transcript("Fetching news...")
     try:
-        items     = get_news()
+        items     = speak_while("Fetching the latest news, sir.", get_news)
         headlines = [str(item) for item in items]
         ui_update_news(headlines)
         summary = "Here are the latest headlines, sir. " + ". ".join(headlines[:3])
@@ -446,6 +681,7 @@ def cmd_news():
         speak(summary)
         remember_exchange("What is the latest news?", " | ".join(headlines[:6]))
     except Exception as e:
+        presence.play_sound("error")
         msg = f"Could not retrieve news, sir: {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -529,11 +765,18 @@ def cmd_todo_clear_done():
 
 # ── Calendar ──────────────────────────────────────────────
 
+def get_calendar_events(limit: int = 8) -> list[dict]:
+    """
+    Upcoming events with repeating ones collapsed into a single entry.
+    Fetches a wider window first so a weekly event can't fill every slot.
+    """
+    return group_recurring(get_upcoming_events(max_results=25))[:limit]
+
 def cmd_calendar_read():
-    speak("Checking your calendar, sir.")
     ui_show_transcript("Fetching calendar events...")
     try:
-        events  = get_upcoming_events(max_results=8)
+        events  = speak_while("Checking your calendar, sir.",
+                              get_calendar_events)
         summary = format_events_for_speech(events)
         ui_update_calendar(events)
         ui_show_widget("calendar", events)
@@ -541,11 +784,11 @@ def cmd_calendar_read():
         speak(summary)
         # Store full event details in history so follow-up questions
         # like "what time is the first one" or "add it to my tasks" work
-        events_text = " | ".join(
-            f"{e['title']} on {e['start_human']}" for e in events
-        ) if events else "No upcoming events."
+        events_text = " | ".join(describe_event(e) for e in events) \
+            if events else "No upcoming events."
         remember_exchange("What is on my calendar?", events_text)
     except CalendarError as e:
+        presence.play_sound("error")
         msg = f"I could not access your calendar, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -566,10 +809,11 @@ def cmd_calendar_create(title: str, date: str, time: str = "", duration: int = 6
         )
         ui_show_transcript(msg)
         speak(msg)
-        events = get_upcoming_events(max_results=8)
+        events = get_calendar_events()
         ui_update_calendar(events)
         ui_show_widget("calendar", events)
     except CalendarError as e:
+        presence.play_sound("error")
         msg = f"I could not create that event, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -596,10 +840,11 @@ def cmd_calendar_reminder(title: str, date: str, time: str, remind_before: int =
         )
         ui_show_transcript(msg)
         speak(msg)
-        events = get_upcoming_events(max_results=8)
+        events = get_calendar_events()
         ui_update_calendar(events)
         ui_show_widget("calendar", events)
     except CalendarError as e:
+        presence.play_sound("error")
         msg = f"I could not set that reminder, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -627,6 +872,7 @@ def cmd_web_search(query: str):
         if response.strip():
             remember_exchange(query, response)
     except Exception as e:
+        presence.play_sound("error")
         msg = f"My web search came up empty, sir. {e}"
         ui_show_transcript(msg)
         speak(msg)
@@ -651,6 +897,7 @@ def cmd_sleep():
     msg = "Alright sir, I will be available whenever you need me."
     ui_show_transcript(msg)
     speak(msg)
+    presence.play_sound("sleep")
     ui_set_status("sleeping")
     clear_history()
     awake.clear()
@@ -699,6 +946,7 @@ FUNCTION_REGISTRY = {
     "cmd_skip_song":          cmd_skip_song,
     "cmd_previous_song":      cmd_previous_song,
     "cmd_restart_song":       cmd_restart_song,
+    "cmd_now_playing":        cmd_now_playing,
     # News & Web
     "cmd_news":               cmd_news,
     "cmd_daily_text":         cmd_daily_text,
@@ -805,6 +1053,10 @@ cmd_previous_song()
 cmd_restart_song()
     Restart the current song from the beginning.
 
+cmd_now_playing()
+    Say what song is playing and show the Now Playing widget.
+    e.g. "what's playing", "what song is this", "who sings this"
+
 cmd_system_stats()
     Report CPU, memory, and battery status and show a diagnostics widget.
     e.g. "run diagnostics", "how is the system doing", "check cpu"
@@ -903,6 +1155,8 @@ e.g. "close the weather widget", "dismiss the timer", "hide diagnostics"
 cmd_chat(message: str)
 Use for general questions, conversation, jokes, or anything that does not
 match any function above. Also use for maths and calculations.
+message must be the user's exact words, copied verbatim.
+NEVER answer the question yourself — another step does that.
 e.g. "tell me a joke", "what is the speed of light", "what is 25 times 4"
 """
 
@@ -942,6 +1196,20 @@ def _ollama_function_call(user_input: str) -> dict:
         return {"function": "cmd_chat", "args": {"message": user_input}}
 
 
+def warm_up_model():
+    """
+    Run one throwaway routing request at startup. This loads Qwen into
+    VRAM (it then stays loaded — see KEEP_ALIVE in streaming_control)
+    so your first real command doesn't wait for the model to load.
+    """
+    start = time.time()
+    try:
+        stream_function_call("what time is it", TOOL_DEFINITIONS, model=AI_MODEL)
+        print(f"[AI] Model warmed up in {time.time() - start:.1f}s")
+    except Exception as e:
+        print(f"[AI] Warm-up failed (Orion will still work): {e}")
+
+
 # ──────────────────────────────────────────────────────────
 # DISPATCHER
 # ──────────────────────────────────────────────────────────
@@ -960,9 +1228,20 @@ def dispatch(user_input: str):
 
 
 def _run_dispatch(user_input: str):
-    call    = _ollama_function_call(user_input)
+    # Simple, unambiguous phrases skip Qwen entirely (see fast_path.py)
+    call = match_fast_path(user_input)
+    if call:
+        print("[Dispatch] Fast path")
+    else:
+        call = _ollama_function_call(user_input)
     fn_name = call.get("function", "cmd_chat")
     args    = call.get("args", {})
+
+    # The router sometimes writes its OWN answer into the chat message
+    # instead of passing on what you said — so the chat model ends up
+    # replying to Qwen's guess, not to you. Always send your exact words.
+    if fn_name == "cmd_chat":
+        args = {"message": user_input}
 
     print(f"[Dispatch] -> {fn_name}({args})")
 
@@ -974,6 +1253,7 @@ def _run_dispatch(user_input: str):
         cmd_chat(user_input)
     except Exception as e:
         print(f"[Dispatch] Unexpected error in {fn_name}: {e}")
+        presence.play_sound("error")
         msg = "I ran into an issue with that, sir. Please try again."
         ui_show_transcript(msg)
         speak(msg)
@@ -983,15 +1263,24 @@ def _run_dispatch(user_input: str):
 # MAIN ASSISTANT LOOP
 # ──────────────────────────────────────────────────────────
 def assistant_logic():
-    # Give pywebview time to finish loading the HTML/JS
-    time.sleep(2.5)
+    # Load Qwen into VRAM in the background so the first command is fast
+    Thread(target=warm_up_model, daemon=True).start()
+
+    # Give pywebview time to finish loading the HTML/JS — and use that
+    # quiet moment to calibrate the mic (before Orion starts talking,
+    # or it would measure his own voice as background noise).
+    start = time.time()
+    calibrate_mic()
+    time.sleep(max(0.0, 2.5 - (time.time() - start)))
 
     # Initialise modules that need callbacks
     pygame.mixer.init()
     presence.init(_tts_loop)
     init_streaming(speak, ui_show_transcript)
-    init_timers(speak, ui_show_transcript, ui_update_timers)
+    init_timers(speak, ui_show_transcript, ui_update_timers,
+                alert_fn=lambda: presence.play_sound("timer", wait=True))
 
+    presence.play_sound("startup")
     speak("Activating Orion Mark 2.")
     ui_show_transcript("Orion MK2 online and ready, sir.")
     greetMe(speak)
@@ -1007,8 +1296,6 @@ def assistant_logic():
                 if listen_for_wake():
                     presence.play_chime()
                     cmd_wake_up()
-                else:
-                    time.sleep(0.5)
                 continue
 
             # ── ACTIVE MODE ─────────────────────────────
@@ -1027,9 +1314,10 @@ def assistant_logic():
                 cmd_wake_up()
                 continue
 
-            presence.play_chime()
+            presence.play_sound("got_it")
             dispatch(query)
-            ui_set_status("idle")
+            # dispatch may have sent Orion to sleep — don't overwrite that
+            ui_set_status("idle" if awake.is_set() else "sleeping")
 
         except Exception as e:
             print(f"[Loop] Unhandled error: {e}")

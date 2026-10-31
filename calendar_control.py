@@ -11,7 +11,7 @@ Setup (one-time):
     3. Credentials → Create OAuth 2.0 Client ID → Desktop App
     4. Download JSON → save as  credentials.json  next to this file
     5. First run opens a browser for you to authorise — token.json
-       is then saved automatically for all future runs.
+        is then saved automatically for all future runs.
 ────────────────────────────────────────────────────────────────
 """
 
@@ -117,9 +117,9 @@ def _fmt_time(hour: int, minute: int) -> str:
     """
     Convert hour/minute to a natural spoken time string.
     e.g. 14:00 -> '2 in the afternoon'
-         09:30 -> 'half past 9 in the morning'
-         13:15 -> 'quarter past 1 in the afternoon'
-         07:45 -> 'quarter to 8 in the morning'
+        09:30 -> 'half past 9 in the morning'
+        13:15 -> 'quarter past 1 in the afternoon'
+        07:45 -> 'quarter to 8 in the morning'
     """
     period  = "in the morning" if hour < 12 else ("at noon" if hour == 12 and minute == 0 else "in the afternoon" if hour < 17 else "in the evening")
     h12     = hour % 12 or 12
@@ -155,7 +155,74 @@ def _event_to_dict(event: dict) -> dict:
         "start_human": _fmt_dt(start_raw),
         "description": event.get("description", ""),
         "location":    event.get("location", ""),
+        # Set by Google on every occurrence of a repeating event
+        "recurring_id": event.get("recurringEventId", ""),
     }
+
+
+def _repeat_phrase(starts: list[str]) -> str:
+    """
+    Describe how a repeating event repeats, from its occurrence start times.
+    e.g. every 7 days on a Wednesday at 9am -> 'every Wednesday at 9 in the morning'
+    """
+    try:
+        dts = [
+            datetime.datetime.fromisoformat(s) if "T" in s
+            else datetime.datetime.combine(datetime.date.fromisoformat(s), datetime.time())
+            for s in starts
+        ]
+    except Exception:
+        return "repeating"
+    gaps = {(b.date() - a.date()).days for a, b in zip(dts, dts[1:])}
+    timed = "T" in starts[0]
+    at = f" at {_fmt_time(dts[0].hour, dts[0].minute)}" if timed else ""
+    if gaps == {7}:
+        return f"every {dts[0].strftime('%A')}{at}"
+    if gaps == {1}:
+        return f"every day{at}"
+    if gaps == {14}:
+        return f"every other {dts[0].strftime('%A')}{at}"
+    return f"repeating{at}"
+
+
+def group_recurring(events: list[dict]) -> list[dict]:
+    """
+    Collapse repeating events into one entry each, keeping time order.
+    The first (next) occurrence is kept, with extra fields:
+        repeat      — e.g. 'every Wednesday at 9 in the morning' ('' if one-off)
+        occurrences — how many times it appeared in the list
+    """
+    groups: dict[str, dict] = {}
+    order:  list[str]       = []
+    for e in events:
+        key = e.get("recurring_id") or f"single:{e['id']}"
+        if key not in groups:
+            groups[key] = {**e, "repeat": "", "occurrences": 0, "_starts": []}
+            order.append(key)
+        groups[key]["occurrences"] += 1
+        groups[key]["_starts"].append(e["start"])
+    out = []
+    for key in order:
+        g = groups[key]
+        if g["occurrences"] > 1:
+            g["repeat"] = _repeat_phrase(g["_starts"])
+        del g["_starts"]
+        out.append(g)
+    return out
+
+
+def describe_event(e: dict) -> str:
+    """One spoken line for an event (grouped or single)."""
+    if e.get("repeat"):
+        return f"{e['title']}, {e['repeat']}, next on {_fmt_date_only(e['start'])}"
+    return f"{e['title']} on {e['start_human']}"
+
+
+def _fmt_date_only(iso_str: str) -> str:
+    try:
+        return _fmt_date(datetime.date.fromisoformat(iso_str[:10]))
+    except Exception:
+        return iso_str
 
 
 # ── Public API ────────────────────────────────────────────
@@ -288,17 +355,24 @@ def set_reminder(
 
 
 def format_events_for_speech(events: list[dict]) -> str:
-    """Turn a list of event dicts into a natural spoken sentence."""
+    """
+    Turn a list of event dicts into a natural spoken sentence.
+    Repeating events are mentioned once ("every Wednesday…") rather
+    than once per week.
+    """
     if not events:
         return "You have no upcoming events, sir."
 
-    if len(events) == 1:
-        e = events[0]
-        return f"You have one event: {e['title']} on {e['start_human']}."
+    grouped = events if any("repeat" in e for e in events) else group_recurring(events)
 
-    lines = [f"You have {len(events)} upcoming events, sir."]
-    for e in events[:5]:           # speak at most 5 to avoid a wall of text
-        lines.append(f"{e['title']} on {e['start_human']}.")
+    if len(grouped) == 1:
+        return f"You have one thing coming up: {describe_event(grouped[0])}."
+
+    lines = ["Here's what's coming up, sir."]
+    for e in grouped[:5]:          # speak at most 5 to avoid a wall of text
+        lines.append(f"{describe_event(e)}.")
+    if len(grouped) > 5:
+        lines.append(f"And {len(grouped) - 5} more after that.")
     return " ".join(lines)
 
 

@@ -50,6 +50,11 @@ MAX_HISTORY_TURNS = 10
 # Sentence-ending punctuation
 _SENTENCE_END = re.compile(r'[.!?]+')
 
+# How long the model stays in VRAM after the last request. Ollama's
+# default is 5 minutes; after that the next command waits several
+# seconds to reload. -1 = never unload, "0" = unload immediately.
+KEEP_ALIVE = "10m"
+
 
 # ── Init ──────────────────────────────────────────────────
 
@@ -195,6 +200,7 @@ def stream_response(
             model    = model,
             messages = messages,
             stream   = True,
+            keep_alive = KEEP_ALIVE,
         )
 
         for chunk in stream:
@@ -264,6 +270,7 @@ def stream_function_call(
                 }
             ],
             stream = False,
+            keep_alive = KEEP_ALIVE,
         )
         return response["message"]["content"].strip()
     except Exception as e:

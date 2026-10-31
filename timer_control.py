@@ -21,14 +21,16 @@ _id_counter = 0
 _speak_fn       = None
 _ui_transcript  = None
 _ui_update_timers = None
+_alert_fn         = None   # optional: plays an alert sound before announcing
 
 
-def init(speak_fn, ui_transcript_fn, ui_update_timers_fn):
+def init(speak_fn, ui_transcript_fn, ui_update_timers_fn, alert_fn=None):
     """Call this once from main.py after defining speak / ui functions."""
-    global _speak_fn, _ui_transcript, _ui_update_timers
+    global _speak_fn, _ui_transcript, _ui_update_timers, _alert_fn
     _speak_fn         = speak_fn
     _ui_transcript    = ui_transcript_fn
     _ui_update_timers = ui_update_timers_fn
+    _alert_fn         = alert_fn
 
 
 def _next_id() -> str:
@@ -47,6 +49,11 @@ def _timer_thread(timer_id: str, seconds: float, label: str):
     msg = f"Sir, your timer '{label}' is done."
     if _ui_transcript:
         _ui_transcript(msg)
+    if _alert_fn:
+        try:
+            _alert_fn()            # e.g. the timer chime, so you notice from another room
+        except Exception as e:
+            print(f"[Timer] Alert sound failed: {e}")
     if _speak_fn:
         _speak_fn(msg)
     if _ui_update_timers:

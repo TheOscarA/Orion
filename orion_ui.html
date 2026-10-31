@@ -74,6 +74,11 @@
   #orb-svg  { position:absolute; inset:0; width:100%; height:100%; animation:spin-slow 18s linear infinite; }
   #orb-svg2 { position:absolute; inset:8%; width:84%; height:84%; animation:spin-slow 12s linear infinite reverse; opacity:.5; }
   @keyframes spin-slow { to{transform:rotate(360deg)} }
+  /* Speaking: the orb's rings glow teal */
+  #orb-wrap.speaking #orb-svg  { filter:drop-shadow(0 0 6px rgba(0,255,200,.55)) hue-rotate(-25deg); }
+  #orb-wrap.speaking #orb-svg2 { opacity:.8; filter:hue-rotate(-25deg); }
+  #orb-wrap.speaking #orb-status { color:#00ffc8; }
+  #orb-svg, #orb-svg2 { transition:opacity .4s, filter .4s; }
   #waveform-canvas { position:relative; z-index:2; border-radius:50%; width:55%; height:55%; }
   #orb-status { position:absolute; bottom:-8px; font-family:'Orbitron',sans-serif; font-size:11px; letter-spacing:3px; color:var(--accent); opacity:.8; }
   #orion-title { font-family:'Orbitron',sans-serif; font-size:clamp(2rem,5vw,3.2rem); font-weight:900; letter-spacing:10px; color:var(--text); text-shadow:var(--glow-lg); }
@@ -119,6 +124,12 @@
   .widget[data-slot="mid-right"]    { top:50%; right:10px; transform:translateY(-50%); animation:w-in-mid .35s cubic-bezier(.22,1,.36,1) both; }
   .widget[data-slot="bottom-left"]  { bottom:85px; left:10px; }
   .widget[data-slot="bottom-right"] { bottom:85px; right:10px; }
+  /* Closing animation for the middle slots. Must come AFTER the slot rules
+     above, otherwise their entrance animation overrides it and the widget
+     never closes (the bug that kept Now Playing / Calendar on screen). */
+  @keyframes w-out-mid { to{opacity:0;transform:translateY(-50%) scale(.88)} }
+  .widget.closing[data-slot="mid-left"],
+  .widget.closing[data-slot="mid-right"] { animation:w-out-mid .25s ease-in both; }
   @keyframes w-in-mid { from{opacity:0;transform:translateY(calc(-50% + 10px)) scale(.88)} to{opacity:1;transform:translateY(-50%) scale(1)} }
 
   .widget-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:10px; }
@@ -401,22 +412,38 @@ setInterval(updateClock,1000); updateClock();
 // ─── WAVEFORM ─────────────────────────────────────────────
 const canvas=document.getElementById('waveform-canvas'),ctx=canvas.getContext('2d');
 let phase=0,waveMode='idle';
+// Speaking: a syllable-like level that jumps to a new target every
+// ~110 ms and eases towards it, so the bars move like speech.
+let speechLevel=0,speechTarget=0,speechNext=0;
+function updateSpeechLevel(){
+  const now=performance.now();
+  if(now>speechNext){
+    speechTarget=Math.random()<.18?.12:.35+Math.random()*.65;   // occasional short gap between words
+    speechNext=now+70+Math.random()*90;
+  }
+  speechLevel+=(speechTarget-speechLevel)*.28;
+}
 function drawWave(){
   const W=canvas.width,H=canvas.height;ctx.clearRect(0,0,W,H);
   const bars=28,barW=3,gap=(W-bars*barW)/(bars+1),cy=H/2;
+  if(waveMode==='speaking')updateSpeechLevel();
   for(let i=0;i<bars;i++){
     const x=gap+i*(barW+gap);
     let amp;
     if(waveMode==='idle')amp=4+3*Math.sin(phase+i*.4);
     else if(waveMode==='listening')amp=10+20*Math.abs(Math.sin(phase*1.8+i*.5))+Math.random()*12;
     else if(waveMode==='sleeping')amp=1.5;
+    else if(waveMode==='speaking'){
+      const c=(bars-1)/2,bell=Math.exp(-((i-c)**2)/(2*(bars/4.5)**2));   // loudest in the centre
+      amp=3+34*speechLevel*bell*(.65+.35*Math.sin(phase*2.4+i*.9));
+    }
     else amp=6+10*Math.abs(Math.sin(phase*1.2+i*.6));
-    const hue=waveMode==='understanding'?'30':'195';
+    const hue=waveMode==='understanding'?'30':waveMode==='speaking'?'172':'195';
     const alpha=(waveMode==='idle'||waveMode==='sleeping')?.35:.85;
     ctx.fillStyle=`hsla(${hue},100%,60%,${alpha})`;ctx.shadowColor=`hsl(${hue},100%,65%)`;ctx.shadowBlur=waveMode==='idle'?4:12;
     ctx.beginPath();ctx.roundRect(x,cy-amp,barW,amp*2,2);ctx.fill();
   }
-  phase+=waveMode==='listening'?.14:.06;requestAnimationFrame(drawWave);
+  phase+=waveMode==='listening'?.14:waveMode==='speaking'?.1:.06;requestAnimationFrame(drawWave);
 }
 drawWave();
 
@@ -425,9 +452,11 @@ function setStatus(status){
   waveMode=status;
   const dot=document.getElementById('status-dot'),label=document.getElementById('status-label'),
         orb=document.getElementById('orb-status'),sleep=document.getElementById('sleep-overlay');
-  const cfg={idle:{color:'#00c8ff',label:'ONLINE',orb:'STANDBY'},listening:{color:'#00c8ff',label:'LISTENING',orb:'LISTENING'},understanding:{color:'#ff9900',label:'PROCESSING',orb:'PROCESSING'},sleeping:{color:'#2a4a5a',label:'SLEEPING',orb:'SLEEPING'},error:{color:'#ff3333',label:'ERROR',orb:'ERROR'}}[status]||{color:'#00c8ff',label:status.toUpperCase(),orb:status.toUpperCase()};
+  const cfg={idle:{color:'#00c8ff',label:'ONLINE',orb:'STANDBY'},listening:{color:'#00c8ff',label:'LISTENING',orb:'LISTENING'},understanding:{color:'#ff9900',label:'PROCESSING',orb:'PROCESSING'},speaking:{color:'#00ffc8',label:'SPEAKING',orb:'SPEAKING'},sleeping:{color:'#2a4a5a',label:'SLEEPING',orb:'SLEEPING'},error:{color:'#ff3333',label:'ERROR',orb:'ERROR'}}[status]||{color:'#00c8ff',label:status.toUpperCase(),orb:status.toUpperCase()};
   dot.style.background=cfg.color;dot.style.boxShadow=`0 0 10px ${cfg.color}`;label.textContent=cfg.label;orb.textContent=cfg.orb;
   status==='sleeping'?sleep.classList.add('active'):sleep.classList.remove('active');
+  const orbWrap=document.getElementById('orb-wrap');
+  if(orbWrap) orbWrap.classList.toggle('speaking', status==='speaking');
 
   // ── Update bottom strip ──
   const sDot   = document.getElementById('strip-dot');
@@ -436,7 +465,7 @@ function setStatus(status){
   if(sDot)  { sDot.style.background=cfg.color; sDot.style.boxShadow=`0 0 8px ${cfg.color}`; }
   if(sLabel){ sLabel.textContent='ORION · '+cfg.label; }
   if(sLine) { sLine.style.background=cfg.color; sLine.style.boxShadow=`0 0 8px ${cfg.color}`; }
-  const active = status==='listening'||status==='understanding';
+  const active = status==='listening'||status==='understanding'||status==='speaking';
   if(sLine) active ? sLine.classList.add('active') : sLine.classList.remove('active');
 }
 
@@ -468,7 +497,16 @@ function addConvEntry(role, text){
   if(!entries) return;
   const ph = entries.querySelector('.conv-empty');
   if(ph) ph.remove();
+  // Orion speaks sentence by sentence — join them into one reply
+  const last = entries.lastElementChild;
+  if(role === 'orion' && last && last.dataset.role === 'orion'){
+    const t = last.querySelector('.conv-text');
+    t.textContent = t.textContent + ' ' + text;
+    entries.scrollTop = entries.scrollHeight;
+    return;
+  }
   const div = document.createElement('div');
+  div.dataset.role = role;
   div.className = 'conv-entry';
   div.innerHTML = `<span class="conv-role ${role}">${role.toUpperCase()}</span><span class="conv-text${role==='orion'?' orion-t':''}">${escapeHtml(text)}</span>`;
   entries.appendChild(div);
@@ -487,7 +525,7 @@ function updateWeather(data){
   document.getElementById('weather-icon').textContent=_wmoIcon(data.wmo_code||0);
 }
 async function _fetchWeatherDirect(){
-  try{const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current_weather=true');
+  try{const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=52.48&longitude=-1.89&current_weather=true');
   const d=await r.json();const{temperature,weathercode:wc}=d.current_weather;
   if(document.getElementById('weather-temp').textContent==='—°C'){document.getElementById('weather-temp').textContent=Math.round(temperature)+'°C';document.getElementById('weather-icon').textContent=_wmoIcon(wc);document.getElementById('weather-detail').textContent='Live · Birmingham';}
   }catch{document.getElementById('weather-detail').textContent='Unavailable';}
@@ -556,8 +594,11 @@ function showWidget(type,data){
 // Called by Python or ✕ button
 function hideWidget(type){
   const el=_widgets[type]; if(!el)return;
+  delete _widgets[type];               // forget it straight away so updates can't revive it
   el.classList.add('closing');
-  el.addEventListener('animationend',()=>{el.remove();delete _widgets[type];},{once:true});
+  const remove=()=>el.remove();
+  el.addEventListener('animationend',remove,{once:true});
+  setTimeout(remove,400);              // safety net in case the animation never fires
 }
 
 function _renderBody(type,data){
@@ -623,10 +664,16 @@ function _rWeather(body,data){
 function _rCal(body,events){
   body.className='w-cal-list';body.innerHTML='';
   if(!events||events.length===0){body.innerHTML='<div class="w-cal-empty">No upcoming events.</div>';return;}
-  events.slice(0,4).forEach(e=>{const item=document.createElement('div');item.className='w-cal-item';item.innerHTML=`<div class="w-cal-title">${escapeHtml(e.title)}</div><div class="w-cal-time">${escapeHtml(e.start_human)}</div>`;body.appendChild(item);});
+  events.slice(0,4).forEach(e=>{const item=document.createElement('div');item.className='w-cal-item';item.innerHTML=`<div class="w-cal-title">${escapeHtml(e.title)}</div><div class="w-cal-time">${escapeHtml(e.start_human)}</div>${e.repeat?`<div class="w-cal-time" style="opacity:.75">↻ ${escapeHtml(e.repeat)}</div>`:''}`;body.appendChild(item);});
 }
 
 // ── NOW PLAYING ──
+// Called by Python when the track changes while the widget is open.
+// Updates in place (no pop-in animation); does nothing if you closed it.
+function updateNowPlaying(data){
+  if(!_widgets['nowplay'])return;
+  const b=document.getElementById('wb-nowplay'); if(b)_rNowPlay(b,data);
+}
 function _rNowPlay(body,data){
   const track=(data&&data.track)||'Now Playing';const artist=(data&&data.artist)||'Spotify';const paused=data&&data.paused;
   body.innerHTML=`<div class="w-np-track">${escapeHtml(track)}</div><div class="w-np-sub">${escapeHtml(artist)}</div><div class="w-np-bars${paused?' w-np-paused':''}"><div class="w-np-bar"></div><div class="w-np-bar"></div><div class="w-np-bar"></div><div class="w-np-bar"></div><div class="w-np-bar"></div></div>`;
