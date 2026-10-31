@@ -199,7 +199,7 @@ def create_event(
     title            : event name, e.g. "Team standup"
     date_str         : natural language date, e.g. "tomorrow", "next Friday"
     time_str         : natural language time, e.g. "3pm", "half past 2"
-                        If omitted an all-day event is created.
+                       If omitted an all-day event is created.
     duration_minutes : length of timed events (default 60)
     description      : optional notes
     location         : optional location string
@@ -300,6 +300,73 @@ def format_events_for_speech(events: list[dict]) -> str:
     for e in events[:5]:           # speak at most 5 to avoid a wall of text
         lines.append(f"{e['title']} on {e['start_human']}.")
     return " ".join(lines)
+
+
+def delete_event(title: str, date_str: str = "") -> str:
+    """
+    Delete a calendar event by partial title match.
+    If date_str is provided it narrows the search to events around that date.
+    Returns a spoken confirmation string.
+    """
+    try:
+        service = _get_service()
+        now     = datetime.datetime.utcnow().isoformat() + "Z"
+
+        raw = service.events().list(
+            calendarId   = "primary",
+            timeMin      = now,
+            maxResults   = 50,
+            singleEvents = True,
+            orderBy      = "startTime",
+        ).execute()
+
+        events     = raw.get("items", [])
+        title_low  = title.strip().lower()
+
+        # Filter by title match
+        matches = [
+            e for e in events
+            if title_low in e.get("summary", "").lower()
+        ]
+
+        # Narrow by date if provided
+        if date_str and matches:
+            parsed = _parse_dt(date_str)
+            if parsed:
+                target_date = parsed.date()
+                narrowed = []
+                for e in matches:
+                    start_raw = e["start"].get("dateTime", e["start"].get("date", ""))
+                    try:
+                        if "T" in start_raw:
+                            event_date = datetime.datetime.fromisoformat(start_raw).date()
+                        else:
+                            event_date = datetime.date.fromisoformat(start_raw)
+                        if event_date == target_date:
+                            narrowed.append(e)
+                    except Exception:
+                        continue
+                if narrowed:
+                    matches = narrowed
+
+        if not matches:
+            return f"I could not find any upcoming event matching '{title}', sir."
+
+        # Delete all matches (usually just one)
+        deleted_titles = []
+        for e in matches:
+            service.events().delete(
+                calendarId = "primary",
+                eventId    = e["id"],
+            ).execute()
+            deleted_titles.append(e.get("summary", "Untitled"))
+
+        if len(deleted_titles) == 1:
+            return f"Done, sir. I have removed '{deleted_titles[0]}' from your calendar."
+        return f"Done, sir. I removed {len(deleted_titles)} events: {', '.join(deleted_titles)}."
+
+    except HttpError as e:
+        raise CalendarError(f"Google API error: {e}") from e
 
 
 # ── Custom exception ──────────────────────────────────────

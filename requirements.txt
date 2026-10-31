@@ -38,3 +38,11 @@ requests
 
 # Web search
 ddgs
+
+# Windows SMTC now playing (Windows 10/11 only)
+winrt-runtime
+winrt-Windows.Media.Control
+winrt-Windows.Foundation
+winrt-Windows.Foundation.Collections
+winrt-Windows.Storage
+winrt-Windows.Storage.Streams

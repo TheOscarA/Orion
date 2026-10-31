@@ -89,8 +89,13 @@
   .sys-bar      { height:3px; background:rgba(0,200,255,0.15); border-radius:2px; overflow:hidden; }
   .sys-bar-fill { height:100%; background:var(--accent); box-shadow:0 0 6px var(--accent); border-radius:2px; transition:width 1s ease; }
 
+  /* NEWS widget */
+  .w-news-item { padding:7px 0; border-bottom:1px solid rgba(0,200,255,0.08); font-size:.82rem; color:var(--text); line-height:1.4; }
+  .w-news-item:last-child { border-bottom:none; }
+  .w-news-num { font-family:'Orbitron',sans-serif; font-size:8px; color:var(--accent); margin-right:6px; }
+
   /* ══════════════════════════════════════
-    WIDGET LAYER
+     WIDGET LAYER
   ══════════════════════════════════════ */
   #widget-layer { position:absolute; inset:0; pointer-events:none; z-index:10; }
 
@@ -178,11 +183,18 @@
 
   /* RIGHT COLUMN */
   #right-col { display:flex; flex-direction:column; gap:10px; overflow:hidden; }
-  #news-panel { flex:1; overflow:hidden; }
-  #news-list  { display:flex; flex-direction:column; gap:0; }
-  .news-item  { padding:10px 0; border-bottom:1px solid var(--border); font-size:.9rem; font-weight:500; color:var(--text); line-height:1.4; cursor:pointer; transition:color .2s; }
-  .news-item:last-child { border-bottom:none; }
-  .news-item:hover { color:var(--accent); }
+
+  /* CONVERSATION LOG */
+  #conv-panel { flex:1; overflow:hidden; display:flex; flex-direction:column; min-height:0; }
+  #conv-entries { flex:1; overflow-y:auto; display:flex; flex-direction:column; gap:0; padding-right:4px; }
+  .conv-entry { display:flex; gap:8px; padding:7px 0; border-bottom:1px solid rgba(0,200,255,0.07); align-items:flex-start; }
+  .conv-entry:last-child { border-bottom:none; }
+  .conv-role { font-family:'Orbitron',sans-serif; font-size:8px; letter-spacing:1px; padding:2px 6px; border-radius:4px; flex-shrink:0; margin-top:2px; white-space:nowrap; }
+  .conv-role.you   { background:rgba(0,200,255,0.12); color:var(--accent); }
+  .conv-role.orion { background:rgba(80,200,120,0.12); color:#70cc90; }
+  .conv-text { font-size:.85rem; color:var(--muted); line-height:1.4; }
+  .conv-text.orion-t { color:#b0ddb8; }
+  .conv-empty { font-size:.85rem; color:var(--muted); font-style:italic; padding:4px 0; }
   #cal-task-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
   .mini-panel { background:var(--panel); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
   .mini-panel .panel-label { margin-bottom:8px; }
@@ -191,16 +203,21 @@
   /* TODO */
   #todo-panel { flex-shrink:0; }
   #todo-input-row { display:flex; gap:8px; margin-top:10px; }
-  #todo-input { flex:1; background:rgba(0,200,255,0.06); border:1px solid var(--border); border-radius:8px; color:var(--text); font-family:'Rajdhani',sans-serif; font-size:.9rem; padding:6px 10px; outline:none; }
-  #todo-input:focus { border-color:var(--accent); }
-  #todo-add-btn { background:var(--accent2); border:none; border-radius:8px; color:var(--text); font-family:'Orbitron',sans-serif; font-size:9px; letter-spacing:1px; padding:6px 10px; cursor:pointer; transition:background .2s; }
-  #todo-add-btn:hover { background:var(--accent); color:#000; }
+  #todo-input { flex:1; background:rgba(0,200,255,0.04); border:1px solid rgba(0,200,255,0.15); border-radius:8px; color:var(--text); font-family:'Rajdhani',sans-serif; font-size:.85rem; padding:6px 10px; outline:none; -webkit-appearance:none; appearance:none; }
+  #todo-input::placeholder { color:var(--muted); }
+  #todo-input:focus { border-color:var(--accent); background:rgba(0,200,255,0.07); }
+  #todo-add-btn { background:rgba(0,119,170,0.6); border:1px solid rgba(0,200,255,0.2); border-radius:8px; color:var(--accent); font-family:'Orbitron',sans-serif; font-size:9px; letter-spacing:1px; padding:6px 10px; cursor:pointer; transition:all .2s; }
+  #todo-add-btn:hover { background:rgba(0,200,255,0.15); border-color:var(--accent); }
   #todo-list-ul { list-style:none; display:flex; flex-direction:column; gap:4px; max-height:110px; overflow-y:auto; }
-  #todo-list-ul li { display:flex; align-items:center; gap:8px; font-size:.88rem; color:var(--text); padding:5px 8px; background:rgba(0,200,255,0.04); border-radius:6px; }
+  #todo-list-ul li { display:flex; align-items:center; gap:8px; font-size:.88rem; color:var(--text); padding:5px 8px; background:rgba(0,200,255,0.04); border-radius:6px; position:relative; transition:background .2s; }
+  #todo-list-ul li:hover { background:rgba(0,200,255,0.08); }
   #todo-list-ul li.done { color:var(--muted); text-decoration:line-through; }
   #todo-list-ul li.done .todo-tick { color:#00ff88; }
   .todo-tick  { font-size:10px; color:var(--accent); flex-shrink:0; }
   .todo-empty { color:var(--muted); font-size:.85rem; font-style:italic; padding:4px 0; }
+  .todo-remove { margin-left:auto; background:none; border:none; color:var(--muted); font-size:12px; cursor:pointer; padding:0 2px; line-height:1; opacity:0; transition:opacity .15s, color .15s; flex-shrink:0; }
+  #todo-list-ul li:hover .todo-remove { opacity:1; }
+  .todo-remove:hover { color:#ff4444; }
 
   /* SLEEP */
   #sleep-overlay { display:none; position:fixed; inset:0; z-index:9000; background:rgba(0,0,0,0.88); align-items:center; justify-content:center; flex-direction:column; gap:20px; }
@@ -284,7 +301,7 @@
     <div id="weather-icon">⛅</div>
     <div>
       <div id="weather-temp">—°C</div>
-      <div id="weather-city">London</div>
+      <div id="weather-city">Birmingham</div>
       <div id="weather-detail">Loading…</div>
     </div>
   </div>
@@ -341,10 +358,10 @@
 </main>
 
 <aside id="right-col">
-  <div class="panel" id="news-panel">
-    <div class="panel-label">News</div>
-    <div id="news-list">
-      <div class="news-item" style="color:var(--muted);font-size:.85rem">Say "show me the news" to load headlines…</div>
+  <div class="panel" id="conv-panel">
+    <div class="panel-label">Conversation</div>
+    <div id="conv-entries">
+      <div class="conv-empty">Your conversation will appear here.</div>
     </div>
   </div>
   <div id="cal-task-row">
@@ -440,10 +457,23 @@ function updateSysStats(cpu,mem,bat){
   _updateSysDiagWidget(cpu,mem,bat);
 }
 
-// ─── NEWS ─────────────────────────────────────────────────
+// ─── NEWS — now a widget ──────────────────────────────────
 function updateNewsList(items){
-  const list=document.getElementById('news-list');list.innerHTML='';
-  (items||[]).forEach(item=>{const d=document.createElement('div');d.className='news-item';d.textContent=item;list.appendChild(d);});
+  showWidget('news', items||[]);
+}
+
+// ─── CONVERSATION LOG ─────────────────────────────────────
+function addConvEntry(role, text){
+  const entries = document.getElementById('conv-entries');
+  if(!entries) return;
+  const ph = entries.querySelector('.conv-empty');
+  if(ph) ph.remove();
+  const div = document.createElement('div');
+  div.className = 'conv-entry';
+  div.innerHTML = `<span class="conv-role ${role}">${role.toUpperCase()}</span><span class="conv-text${role==='orion'?' orion-t':''}">${escapeHtml(text)}</span>`;
+  entries.appendChild(div);
+  entries.scrollTop = entries.scrollHeight;
+  while(entries.children.length > 20) entries.removeChild(entries.firstChild);
 }
 
 // ─── WEATHER HEADER ───────────────────────────────────────
@@ -452,14 +482,14 @@ function _wmoIcon(c){const k=Object.keys(WMO).map(Number).filter(n=>n<=c).pop()|
 function updateWeather(data){
   if(!data)return;
   document.getElementById('weather-temp').textContent=data.temperature+'°C';
-  document.getElementById('weather-city').textContent=data.city||'London';
+  document.getElementById('weather-city').textContent=data.city||'Birmingham';
   document.getElementById('weather-detail').textContent=data.condition+' · Feels '+data.feels_like+'°C · 💨 '+data.wind_speed+' mph';
   document.getElementById('weather-icon').textContent=_wmoIcon(data.wmo_code||0);
 }
 async function _fetchWeatherDirect(){
   try{const r=await fetch('https://api.open-meteo.com/v1/forecast?latitude=51.5&longitude=-0.12&current_weather=true');
   const d=await r.json();const{temperature,weathercode:wc}=d.current_weather;
-  if(document.getElementById('weather-temp').textContent==='—°C'){document.getElementById('weather-temp').textContent=Math.round(temperature)+'°C';document.getElementById('weather-icon').textContent=_wmoIcon(wc);document.getElementById('weather-detail').textContent='Live · London';}
+  if(document.getElementById('weather-temp').textContent==='—°C'){document.getElementById('weather-temp').textContent=Math.round(temperature)+'°C';document.getElementById('weather-icon').textContent=_wmoIcon(wc);document.getElementById('weather-detail').textContent='Live · Birmingham';}
   }catch{document.getElementById('weather-detail').textContent='Unavailable';}
 }
 _fetchWeatherDirect();setInterval(_fetchWeatherDirect,600_000);
@@ -469,13 +499,34 @@ function updateTodoList(tasks){
   const ul=document.getElementById('todo-list-ul');ul.innerHTML='';
   if(!tasks||tasks.length===0){const li=document.createElement('li');li.className='todo-empty';li.textContent='No tasks.';ul.appendChild(li);_refreshTaskCount(0,'');return;}
   const pending=tasks.filter(t=>!t.done);
-  tasks.forEach(t=>{const li=document.createElement('li');li.className=t.done?'done':'';li.innerHTML=`<span class="todo-tick">${t.done?'✓':'◆'}</span><span>${escapeHtml(t.text)}</span>`;ul.appendChild(li);});
+  tasks.forEach(t=>{
+    const li=document.createElement('li');
+    li.className=t.done?'done':'';
+    li.dataset.task=t.text;
+    li.innerHTML=`<span class="todo-tick">${t.done?'✓':'◆'}</span><span style="flex:1">${escapeHtml(t.text)}</span><button class="todo-remove" onclick="_removeTodoItem(this)" title="Remove">✕</button>`;
+    ul.appendChild(li);
+  });
   _refreshTaskCount(pending.length,pending[0]?pending[0].text.slice(0,22):'');
 }
 function _refreshTaskCount(n,next){document.getElementById('task-count').textContent=n+' task'+(n!==1?'s':'');document.getElementById('task-next').textContent=n===0?'All clear':(next||'');}
 const todoInput=document.getElementById('todo-input'),todoAddBtn=document.getElementById('todo-add-btn');
 function _submitTodo(){const t=todoInput.value.trim();if(!t)return;todoInput.value='';const ul=document.getElementById('todo-list-ul');const ph=ul.querySelector('.todo-empty');if(ph)ph.remove();const li=document.createElement('li');li.innerHTML=`<span class="todo-tick">◆</span><span>${escapeHtml(t)}</span>`;ul.appendChild(li);}
 todoAddBtn.addEventListener('click',_submitTodo);todoInput.addEventListener('keydown',e=>{if(e.key==='Enter')_submitTodo();});
+
+function _removeTodoItem(btn){
+  const li=btn.closest('li');
+  const task=li?li.dataset.task:null;
+  if(!task)return;
+  // Animate out
+  li.style.transition='opacity .2s, transform .2s';
+  li.style.opacity='0';
+  li.style.transform='translateX(10px)';
+  setTimeout(()=>li.remove(),200);
+  // Tell Python to remove from Google Tasks
+  if(window.pywebview&&window.pywebview.api){
+    window.pywebview.api.remove_task_ui(task);
+  }
+}
 
 // ─── CALENDAR MINI CARD ───────────────────────────────────
 function updateCalendarList(events){
@@ -486,8 +537,8 @@ function updateCalendarList(events){
 // ═══════════════════════════════════════════════════════════
 //  W I D G E T   S Y S T E M
 // ═══════════════════════════════════════════════════════════
-const SLOTS={timer:'top-left',weather:'top-right',calendar:'mid-left',nowplay:'mid-right',sysdiag:'bottom-left',coin:'bottom-right'};
-const TITLES={timer:'Timer',weather:'Weather',calendar:'Calendar',nowplay:'Now Playing',sysdiag:'Diagnostics',coin:'Coin Flip'};
+const SLOTS={timer:'top-left',weather:'top-right',calendar:'mid-left',nowplay:'mid-right',sysdiag:'bottom-left',coin:'bottom-right',news:'mid-left'};
+const TITLES={timer:'Timer',weather:'Weather',calendar:'Calendar',nowplay:'Now Playing',sysdiag:'Diagnostics',coin:'Coin Flip',news:'News'};
 const _widgets={};
 
 // Called by Python to spawn/update a widget
@@ -518,6 +569,7 @@ function _renderBody(type,data){
     case'nowplay':  _rNowPlay(b,data);break;
     case'sysdiag':  _rSysDiag(b,data);break;
     case'coin':     _rCoin(b,data);break;
+    case'news':     _rNews(b,data);break;
   }
 }
 
@@ -596,6 +648,18 @@ function _rCoin(body,data){
   const result=(data&&data.result)||'?';const emoji=result==='Heads'?'🪙':'🔵';
   body.innerHTML=`<div class="w-coin-result">${emoji} ${escapeHtml(result)}</div><div class="w-coin-sub">The coin has spoken, sir.</div>`;
   setTimeout(()=>hideWidget('coin'),5000);
+}
+
+// ── NEWS ──
+function _rNews(body,items){
+  body.innerHTML='';
+  if(!items||items.length===0){body.innerHTML='<div style="color:var(--muted);font-size:.82rem">No headlines available.</div>';return;}
+  items.forEach((item,i)=>{
+    const d=document.createElement('div');
+    d.className='w-news-item';
+    d.innerHTML=`<span class="w-news-num">${String(i+1).padStart(2,'0')}</span>${escapeHtml(item)}`;
+    body.appendChild(d);
+  });
 }
 
 // ─── XSS HELPER ───────────────────────────────────────────

@@ -57,5 +57,5 @@ app_data.json
 *.flac
 *.m4a
 
-# Screenshots directory (if generated locally)
+# Screenshots directory
 screenshots/

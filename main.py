@@ -44,6 +44,7 @@ from brightness_control  import set_brightness
 from system_control      import shutdown, restart
 from application_control import open_application, close_application
 from SearchNow           import searchGoogle, searchYoutube, searchWikipedia
+import presence
 
 from streaming_control import (
     stream_response, stream_function_call,
@@ -107,6 +108,10 @@ async def _speak_async(text: str, voice: str = "en-GB-RyanNeural"):
     try:
         communicate = edge_tts.Communicate(text, voice)
         await communicate.save(_TTS_FILE)
+        # If an acknowledgement ("One moment, sir.") is still playing,
+        # let it finish so Orion never talks over himself.
+        while pygame.mixer.music.get_busy():
+            await asyncio.sleep(0.02)
         pygame.mixer.music.load(_TTS_FILE)
         pygame.mixer.music.play()
         while pygame.mixer.music.get_busy():
@@ -120,6 +125,7 @@ def speak(text: str, voice: str = "en-GB-RyanNeural"):
     """Thread-safe TTS — submits to the persistent event loop."""
     if not text or not text.strip():
         return
+    presence.cancel_ack()   # Orion has something real to say — skip the "one moment"
     future = asyncio.run_coroutine_threadsafe(_speak_async(text, voice), _tts_loop)
     try:
         future.result(timeout=30)
@@ -265,7 +271,7 @@ def cmd_date():
 
 # ── Weather ───────────────────────────────────────────────
 
-def cmd_weather_spoken(city: str = "London"):
+def cmd_weather_spoken(city: str = "Birmingham"):
     ui_set_status("understanding")
     speak(f"Checking the weather in {city}, sir.")
     try:
@@ -281,7 +287,7 @@ def cmd_weather_spoken(city: str = "London"):
         ui_show_transcript(msg)
         speak(msg)
 
-def cmd_weather_forecast(city: str = "London", days: int = 3):
+def cmd_weather_forecast(city: str = "Birmingham", days: int = 3):
     ui_set_status("understanding")
     speak(f"Fetching the {days}-day forecast for {city}, sir.")
     try:
@@ -741,164 +747,163 @@ Do NOT include any explanation, greeting, markdown, or extra text — only the r
 Available functions:
 
 cmd_time()
-  Tell the user the current time.
+    Tell the user the current time.
 
 cmd_date()
-  Tell the user today's date.
+    Tell the user today's date.
 
-cmd_weather_spoken(city: str = "London")
-  Speak the current weather and show a weather widget.
-  Default city is London.
-  e.g. "what's the weather", "weather in Tokyo", "how cold is it outside"
+cmd_weather_spoken(city: str = "Birmingham")
+    Speak the current weather and show a weather widget.
+    Default city is Birmingham.
+    e.g. "what's the weather", "weather in Tokyo", "how cold is it outside"
 
-cmd_weather_forecast(city: str = "London", days: int = 3)
-  Speak a multi-day weather forecast.
-  e.g. "3 day forecast", "will it rain tomorrow in Manchester"
+cmd_weather_forecast(city: str = "Birmingham", days: int = 3)
+    Speak a multi-day weather forecast.
+    e.g. "3 day forecast", "will it rain tomorrow in Manchester"
 
 cmd_volume(level: int)
-  Set system volume 0-100.
-  e.g. "turn volume to 60", "make it louder at 80"
+    Set system volume 0-100.
+    e.g. "turn volume to 60", "make it louder at 80"
 
 cmd_brightness(level: int)
-  Set screen brightness 0-100.
-  e.g. "dim the screen", "brightness to 50"
+    Set screen brightness 0-100.
+    e.g. "dim the screen", "brightness to 50"
 
 cmd_open_app(app_name: str)
-  Open an application.
-  e.g. "open Spotify", "launch Chrome"
+    Open an application.
+    e.g. "open Spotify", "launch Chrome"
 
 cmd_close_app(app_name: str)
-  Close an application.
-  e.g. "close Spotify", "kill Chrome"
+    Close an application.
+    e.g. "close Spotify", "kill Chrome"
 
 cmd_screenshot()
-  Take and save a screenshot.
+    Take and save a screenshot.
 
 cmd_daily_text()
-  Open the daily Bible text on JW.org.
+    Open the daily Bible text on JW.org.
 
 cmd_news()
-  Fetch and read the latest news headlines.
-  e.g. "what is happening today", "show me the news"
+    Fetch and read the latest news headlines.
+    e.g. "what is happening today", "show me the news"
 
 cmd_play_music()
-  Play or resume whatever is currently queued in Spotify. NO arguments.
-  ONLY use when the user says play/resume/unpause with NO specific genre or artist.
-  e.g. "play music", "resume", "unpause", "continue playing"
-  NEVER use for genre/artist requests like "play jazz" — use cmd_search_youtube instead.
+    Play or resume whatever is currently queued in Spotify. NO arguments.
+    ONLY use when the user says play/resume/unpause with NO specific genre or artist.
+    e.g. "play music", "resume", "unpause", "continue playing"
+    NEVER use for genre/artist requests like "play jazz" — use cmd_search_youtube instead.
 
 cmd_pause_music()
-  Pause music on Spotify.
+    Pause music on Spotify.
 
 cmd_skip_song()
-  Skip to the next song on Spotify.
+    Skip to the next song on Spotify.
 
 cmd_previous_song()
-  Go back to the previous song on Spotify.
+    Go back to the previous song on Spotify.
 
 cmd_restart_song()
-  Restart the current song from the beginning.
+    Restart the current song from the beginning.
 
 cmd_system_stats()
-  Report CPU, memory, and battery status and show a diagnostics widget.
-  e.g. "run diagnostics", "how is the system doing", "check cpu"
+    Report CPU, memory, and battery status and show a diagnostics widget.
+    e.g. "run diagnostics", "how is the system doing", "check cpu"
 
 cmd_flip_coin()
-  Flip a coin — heads or tails. NO arguments.
-  ONLY use when explicitly asked to flip a coin. Do NOT use for rock paper scissors or dice.
+    Flip a coin — heads or tails. NO arguments.
+    ONLY use when explicitly asked to flip a coin. Do NOT use for rock paper scissors or dice.
 
 cmd_shutdown()
-  Shut down the computer.
+    Shut down the computer.
 
 cmd_restart_system()
-  Restart the computer.
+    Restart the computer.
 
 cmd_show_windows()
-  Open Windows Task View to show all open windows.
+    Open Windows Task View to show all open windows.
 
 cmd_sleep()
-  Put ORION into sleep/standby mode.
-  e.g. "go to sleep", "goodnight", "standby mode"
+    Put ORION into sleep/standby mode.
+    e.g. "go to sleep", "goodnight", "standby mode"
 
 cmd_wake_up()
-  Wake ORION from sleep.
+    Wake ORION from sleep.
 
 cmd_search_google(query: str)
-  Search Google for something.
-  e.g. "search for best Python tutorials"
+    Search Google for something.
+    e.g. "search for best Python tutorials"
 
 cmd_search_youtube(query: str)
-  Search YouTube and open results in a browser.
-  Use for specific music genre or artist requests e.g. "play some jazz",
-  "put on lo-fi music", "play The Beatles", "find a coding playlist".
-  Also for general YouTube searches e.g. "find a cooking tutorial on YouTube".
+    Search YouTube and open results in a browser.
+    Use for specific music genre or artist requests e.g. "play some jazz",
+    "put on lo-fi music", "play The Beatles", "find a coding playlist".
+    Also for general YouTube searches e.g. "find a cooking tutorial on YouTube".
 
 cmd_search_wikipedia(query: str)
-  Look up something on Wikipedia.
-  e.g. "what is the Roman Empire"
+    Look up something on Wikipedia.
+    e.g. "what is the Roman Empire"
 
 cmd_set_timer(duration: str, label: str = "Timer")
-  Start a countdown timer. Speaks aloud when it finishes.
-  duration — natural language e.g. "25 minutes", "1 hour 30 minutes"
-  label    — optional name e.g. "pasta", "workout"
-  USE THIS for any reminder phrased as a relative time — "in X minutes/hours".
-  e.g. "remind me in 4 minutes", "alert me in half an hour",
-       "set a 10 minute timer", "timer for 25 minutes called pomodoro"
-  The key signal is 'in X minutes/hours' — that is a timer, NOT a calendar reminder.
+    Start a countdown timer. Speaks aloud when it finishes.
+    duration — natural language e.g. "25 minutes", "1 hour 30 minutes"
+    label    — optional name e.g. "pasta", "workout"
+    USE THIS for any reminder phrased as a relative time — "in X minutes/hours".
+    e.g. "remind me in 4 minutes", "alert me in half an hour",
+        "set a 10 minute timer", "timer for 25 minutes called pomodoro"
+    The key signal is 'in X minutes/hours' — that is a timer, NOT a calendar reminder.
 
 cmd_cancel_timer(label: str)
-  Cancel a running timer by name.
-  e.g. "cancel the pasta timer"
+    Cancel a running timer by name.
+    e.g. "cancel the pasta timer"
 
 cmd_list_timers()
-  Read out all active timers and their remaining time.
-  e.g. "how long is left on my timers"
+    Read out all active timers and their remaining time.
+    e.g. "how long is left on my timers"
 
 cmd_todo_add(task: str)
-  Add a task to the persistent to-do list.
-  e.g. "add buy milk to my to-do list", "remind me to call mum"
+    Add a task to the persistent to-do list.
+    e.g. "add buy milk to my to-do list", "remind me to call mum"
 
 cmd_todo_read()
-  Read out all pending tasks.
-  e.g. "what's on my to-do list", "what do I need to do"
+    Read out all pending tasks.
+    e.g. "what's on my to-do list", "what do I need to do"
 
 cmd_todo_complete(task: str)
-  Mark a task as complete.
-  e.g. "mark buy milk as done", "I finished calling mum"
+    Mark a task as complete.
+    e.g. "mark buy milk as done", "I finished calling mum"
 
 cmd_todo_remove(task: str)
-  Remove a task from the list.
-  e.g. "remove buy milk from my list"
+    Remove a task from the list.
+    e.g. "remove buy milk from my list"
 
 cmd_todo_clear_done()
-  Clear all completed tasks.
-  e.g. "clear my completed tasks"
+    Clear all completed tasks.
+    e.g. "clear my completed tasks"
 
 cmd_calendar_read()
-  Show and read out upcoming Google Calendar events. Shows a calendar widget.
-  e.g. "what's on my calendar", "do I have anything today"
+    Show and read out upcoming Google Calendar events. Shows a calendar widget.
+    e.g. "what's on my calendar", "do I have anything today"
 
 cmd_calendar_create(title: str, date: str, time: str = "", duration: int = 60)
-  Create a new Google Calendar event.
-  e.g. "add a meeting called Team Sync tomorrow at 2pm"
+    Create a new Google Calendar event.
+    e.g. "add a meeting called Team Sync tomorrow at 2pm"
 
 cmd_calendar_reminder(title: str, date: str, time: str, remind_before: int = 10)
-  Create a calendar event with a reminder at a specific future date/time.
-  ONLY use for reminders at a specific date or time of day.
-  e.g. "remind me to take my medication tomorrow at 9am",
-       "remind me about the dentist on Friday at 2pm"
-  NEVER use for relative time like 'in 4 minutes' — use cmd_set_timer for those.
-  remind_before = minutes BEFORE the event to alert, default 10.
+    Create a calendar event with a reminder at a specific future date/time.
+    ONLY use for reminders at a specific date or time of day.
+    e.g. "remind me to take my medication tomorrow at 9am",
+        "remind me about the dentist on Friday at 2pm"
+    NEVER use for relative time like 'in 4 minutes' — use cmd_set_timer for those.
+    remind_before = minutes BEFORE the event to alert, default 10.
 
 cmd_close_widget(widget: str)
-  Close/dismiss a widget from the screen.
-  widget must be one of: timer, weather, calendar, nowplay, sysdiag, coin
-  e.g. "close the weather widget", "dismiss the timer", "hide diagnostics"
+    widget must be one of: timer, weather, calendar, nowplay, sysdiag, coin
+e.g. "close the weather widget", "dismiss the timer", "hide diagnostics"
 
 cmd_chat(message: str)
-  Use for general questions, conversation, jokes, or anything that does not
-  match any function above. Also use for maths and calculations.
-  e.g. "tell me a joke", "what is the speed of light", "what is 25 times 4"
+Use for general questions, conversation, jokes, or anything that does not
+match any function above. Also use for maths and calculations.
+e.g. "tell me a joke", "what is the speed of light", "what is 25 times 4"
 """
 
 
@@ -945,6 +950,16 @@ def dispatch(user_input: str):
     print(f"[Dispatch] Input: {user_input!r}")
     ui_set_status("understanding")
 
+    # If routing + the command take a moment, Orion says "One moment, sir."
+    # Quick commands speak before the delay, which cancels it automatically.
+    presence.schedule_ack()
+    try:
+        _run_dispatch(user_input)
+    finally:
+        presence.cancel_ack()   # silent commands (pause, volume) never get an ack
+
+
+def _run_dispatch(user_input: str):
     call    = _ollama_function_call(user_input)
     fn_name = call.get("function", "cmd_chat")
     args    = call.get("args", {})
@@ -973,6 +988,7 @@ def assistant_logic():
 
     # Initialise modules that need callbacks
     pygame.mixer.init()
+    presence.init(_tts_loop)
     init_streaming(speak, ui_show_transcript)
     init_timers(speak, ui_show_transcript, ui_update_timers)
 
@@ -989,6 +1005,7 @@ def assistant_logic():
             # ── SLEEP MODE ──────────────────────────────
             if not awake.is_set():
                 if listen_for_wake():
+                    presence.play_chime()
                     cmd_wake_up()
                 else:
                     time.sleep(0.5)
@@ -1006,9 +1023,11 @@ def assistant_logic():
                 cmd_sleep()
                 continue
             if any(k in query for k in ["wake up", "are you there", "hey orion"]):
+                presence.play_chime()
                 cmd_wake_up()
                 continue
 
+            presence.play_chime()
             dispatch(query)
             ui_set_status("idle")
 
